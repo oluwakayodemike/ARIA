@@ -94,6 +94,16 @@ class SplunkClient:
 
     def run_search(self, spl_query, max_results=100):
         """run a one-shot search and return results."""
-        job = self.service.jobs.oneshot(spl_query, count=max_results)
-        reader = results.JSONResultsReader(job)
-        return [r for r in reader if isinstance(r, dict)]
+        import json
+        # we must explicitly request JSON, otherwise Splunk defaults to XML [and the SDK doesn't parse it right]
+        try:
+            response = self.service.jobs.oneshot(
+                spl_query, 
+                count=max_results, 
+                output_mode="json"
+            )
+            data = json.loads(response.read().decode('utf-8'))
+            return data.get("results", [])
+        except Exception as e:
+            print(f"[-] run_search failed: {e}")
+            return []
