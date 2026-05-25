@@ -1,0 +1,8 @@
+splunk-sdk
+requests
+python-dotenv
+fastapi
+uvicorn
+websockets
+aiohttp
+stix2
