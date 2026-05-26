@@ -1,3 +1,7 @@
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import unittest
 from agents.blue_agent import BlueAgent
 
@@ -101,6 +105,16 @@ class TestBlueAgent(unittest.TestCase):
         result = blue.run()
         
         self.assertEqual(result["coverage_map"]["T9999"]["verdict"], "GAP", "Bad numbers should default to 0 (GAP)")
+
+    def test_trailing_comma_id_is_normalized_and_kept(self):
+        """T1012, should be normalized to T1012 and included in the coverage map, not discarded as malformed."""
+        rows = [{"technique_id": "T1012,", "technique_name": "Query Registry",
+                "count": "2", "enabled_count": "0", "enabled_percentage": "0"}]
+        blue   = BlueAgent(MockSplunkClient(rows))
+        result = blue.run()
+        self.assertIn("T1012", result["coverage_map"],
+                    "Trailing comma should be stripped and T1012 kept")
+        self.assertEqual(result["coverage_map"]["T1012"]["verdict"], "PARTIAL")
 
 if __name__ == "__main__":
     unittest.main()

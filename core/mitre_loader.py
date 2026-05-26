@@ -101,9 +101,11 @@ class MitreLoader:
         return self._techniques
 
     def get_by_id(self, technique_id: str) -> dict | None:
+        """Fetch a single technique by ID, ignoring case and whitespace."""
+        tid = technique_id.strip().upper()
         techniques = self.load()
-        return next((t for t in techniques if t["technique_id"] == technique_id), None)
-
+        return next((t for t in techniques if t["technique_id"].upper() == tid), None)
+        
     def get_by_tactic(self, tactic: str) -> list:
         """Return every technique associated with a specific ATT&CK tactic."""
         normalized_tactic = tactic.strip().lower()

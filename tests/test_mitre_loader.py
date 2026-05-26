@@ -40,7 +40,7 @@ class TestMitreLoader(unittest.TestCase):
                     {
                         "type": "attack-pattern",
                         "name": "Phishing",
-                        "description": "Very long description " + ("x" * 1000),
+                        "description": "x" * 2000, 
                         "external_references": [
                             {"source_name": "mitre-attack", "external_id": "T1566"}
                         ],
@@ -115,7 +115,7 @@ class TestMitreLoader(unittest.TestCase):
             }
         )
 
-        self.assertEqual(loader.get_by_id("T1078")["name"], "Valid Accounts")
+        self.assertEqual(loader.get_by_id("t1078")["name"], "Valid Accounts")
         self.assertEqual(len(loader.get_by_tactic("INITIAL-ACCESS")), 1)
         self.assertEqual(len(loader.get_by_tactic("lateral-movement")), 1)
         self.assertEqual(loader.get_all_tactics(), ["execution", "initial-access", "lateral-movement"])
@@ -162,6 +162,16 @@ class TestMitreLoader(unittest.TestCase):
 
         self.assertEqual(priority_ids, ["T1566", "T1190"])
 
+    def test_get_by_id_returns_none_for_unknown(self):
+        loader = self._make_loader({"objects": []})
+        self.assertIsNone(loader.get_by_id("T9999"), "Should return None for non-existent techniques")
+
+    def test_load_caches_result(self):
+        """load() called twice should return the exact same list object in memory."""
+        loader = self._make_loader({"objects": []})
+        first  = loader.load()
+        second = loader.load()
+        self.assertIs(first, second, "Should return cached list, not reload from disk")
 
 if __name__ == "__main__":
     unittest.main()
