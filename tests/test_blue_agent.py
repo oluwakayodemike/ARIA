@@ -1,18 +1,12 @@
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+import unittest
 from agents.blue_agent import BlueAgent
-
 
 class MockSplunkClient:
     def __init__(self, rows=None):
         self.rows = rows
 
     def run_search(self, query, max_results=1000):
-        print("   [mock] returning fake Splunk data...")
         return self.rows
-
 
 STANDARD_ROWS = [
     # COVERED — rules exist and are enabled
@@ -32,99 +26,81 @@ STANDARD_ROWS = [
      "count": "1", "enabled_count": "0", "enabled_percentage": "0"},
 ]
 
+class TestBlueAgent(unittest.TestCase):
+    
+    def test_standard_verdict_classification(self):
+        blue = BlueAgent(MockSplunkClient(STANDARD_ROWS))
+        result = blue.run()
+        cmap = result["coverage_map"]
 
-def run_tests():
-    print("=" * 60)
-    print("BLUE AGENT TEST SUITE")
-    print("=" * 60)
+        self.assertEqual(cmap["T1059"]["verdict"], "COVERED", "T1059 should be COVERED")
+        self.assertEqual(cmap["T1078"]["verdict"], "PARTIAL", "T1078 should be PARTIAL")
+        self.assertEqual(cmap["T1003"]["verdict"], "GAP", "T1003 should be GAP")
 
-    passed = 0
-    failed = 0
+    def test_duplicate_technique_id_resolution(self):
+        blue = BlueAgent(MockSplunkClient(STANDARD_ROWS))
+        result = blue.run()
+        cmap = result["coverage_map"]
 
-    def assert_test(condition, name, detail=""):
-        nonlocal passed, failed
-        if condition:
-            print(f"  ✅ PASS — {name}")
-            passed += 1
-        else:
-            print(f"  ❌ FAIL — {name}: {detail}")
-            failed += 1
+        self.assertEqual(cmap["T1059"]["verdict"], "COVERED", "Verdict should remain COVERED")
+        self.assertEqual(cmap["T1059"]["total_rules"], 5, "Should retain the count from the COVERED row")
+        self.assertEqual(cmap["T1059"]["enabled_rules"], 5, "Should retain the enabled_count from the COVERED row")
 
-    print("\n[1] Standard verdict classification")
-    blue   = BlueAgent(MockSplunkClient(STANDARD_ROWS))
-    result = blue.run()
-    cmap   = result["coverage_map"]
+    def test_coverage_score_calculation(self):
+        blue = BlueAgent(MockSplunkClient(STANDARD_ROWS))
+        result = blue.run()
+        score = result["score"]
 
-    assert_test(cmap["T1059"]["verdict"] == "COVERED",
-                "T1059 is COVERED (enabled rules exist)")
-    assert_test(cmap["T1078"]["verdict"] == "PARTIAL",
-                "T1078 is PARTIAL (rules exist but disabled)")
-    assert_test(cmap["T1003"]["verdict"] == "GAP",
-                "T1003 is GAP (no rules at all)")
+        # 3 unique techniques: 1 covered, 1 partial, 1 gap
+        # score = ((1 + 0.5) / 3) * 100 = 50.0
+        self.assertEqual(score["score"], 50.0)
+        self.assertEqual(score["covered"], 1)
+        self.assertEqual(score["partial"], 1)
+        self.assertEqual(score["gaps"], 1)
+        self.assertEqual(score["total"], 3)
 
-    print("\n[2] Duplicate technique ID resolution")
-    assert_test("T1059" in cmap and len([k for k in cmap if k == "T1059"]) == 1,
-                "T1059 appears exactly once in coverage map")
-    assert_test(cmap["T1059"]["verdict"] == "COVERED",
-                "T1059 keeps best verdict (COVERED) when duplicate found")
+    def test_gap_and_partial_accessors(self):
+        blue = BlueAgent(MockSplunkClient(STANDARD_ROWS))
+        result = blue.run()
+        cmap = result["coverage_map"]
 
-    print("\n[3] Coverage score calculation")
-    score = result["score"]
-    assert_test(score["score"] == 50.0,
-                f"Score is 50.0% (got {score['score']}%)")
-    assert_test(score["covered"] == 1, "Covered count is 1")
-    assert_test(score["partial"] == 1, "Partial count is 1")
-    assert_test(score["gaps"]    == 1, "Gap count is 1")
-    assert_test(score["total"]   == 3, "Total count is 3")
+        gaps = blue.get_gaps(cmap)
+        partials = blue.get_partials(cmap)
 
-    print("\n[4] Gap and partial accessors")
-    gaps     = blue.get_gaps(cmap)
-    partials = blue.get_partials(cmap)
+        self.assertEqual(len(gaps), 1)
+        self.assertEqual(gaps[0]["technique_id"], "T1003")
+        
+        self.assertEqual(len(partials), 1)
+        self.assertEqual(partials[0]["technique_id"], "T1078")
 
-    assert_test(len(gaps) == 1 and gaps[0]["technique_id"] == "T1003",
-                "get_gaps() returns exactly T1003")
-    assert_test(len(partials) == 1 and partials[0]["technique_id"] == "T1078",
-                "get_partials() returns exactly T1078")
+    def test_empty_lookup_table(self):
+        blue = BlueAgent(MockSplunkClient([]))
+        result = blue.run()
+        
+        self.assertEqual(result["score"]["score"], 0)
+        self.assertEqual(result["coverage_map"], {})
 
-    print("\n[5] Empty lookup table")
-    blue_empty = BlueAgent(MockSplunkClient([]))
-    result_empty = blue_empty.run()
-    assert_test(result_empty["score"]["score"] == 0,
-                "Score is 0% when no data returned")
-    assert_test(result_empty["coverage_map"] == {},
-                "Coverage map is empty dict when no data")
+    def test_dirty_and_malformed_data(self):
+        dirty_rows = [
+            {"technique_id": "",          "count": "1", "enabled_count": "1"},
+            {"technique_id": "T1012,T1078","count": "1", "enabled_count": "1"},
+            {"technique_id": "INVALID",   "count": "1", "enabled_count": "1"},
+            {},  # completely empty row
+        ]
+        blue = BlueAgent(MockSplunkClient(dirty_rows))
+        result = blue.run()
 
-    print("\n[6] Dirty and malformed data")
-    dirty_rows = [
-        {"technique_id": "",          "count": "1", "enabled_count": "1"},
-        {"technique_id": "T1012,T1078","count": "1", "enabled_count": "1"},
-        {"technique_id": "INVALID",   "count": "1", "enabled_count": "1"},
-        {},  # completely empty row
-    ]
-    blue_dirty = BlueAgent(MockSplunkClient(dirty_rows))
-    result_dirty = blue_dirty.run()
+        self.assertEqual(result["coverage_map"], {}, "Malformed rows should be skipped")
 
-    assert_test(result_dirty["coverage_map"] == {},
-                "All unrecoverable malformed rows are skipped, coverage map is empty")
-
-    print("\n[7] Non-numeric count handling")
-    bad_count_rows = [
-        {"technique_id": "T9999", "technique_name": "Test",
-         "count": "abc", "enabled_count": "xyz", "enabled_percentage": "??"}
-    ]
-    blue_bad = BlueAgent(MockSplunkClient(bad_count_rows))
-    result_bad = blue_bad.run()
-    assert_test(result_bad["coverage_map"]["T9999"]["verdict"] == "GAP",
-                "Non-numeric counts treated as 0, technique becomes GAP")
-
-    print(f"\n{'='*60}")
-    print(f"Results: {passed} passed, {failed} failed")
-    if failed == 0:
-        print("ALL TESTS PASSED 🎉")
-    else:
-        print(f"{failed} TEST(S) FAILED ❌")
-    print("=" * 60)
-
+    def test_non_numeric_count_handling(self):
+        bad_count_rows = [
+            {"technique_id": "T9999", "technique_name": "Test",
+             "count": "abc", "enabled_count": "xyz", "enabled_percentage": "??"}
+        ]
+        blue = BlueAgent(MockSplunkClient(bad_count_rows))
+        result = blue.run()
+        
+        self.assertEqual(result["coverage_map"]["T9999"]["verdict"], "GAP", "Bad numbers should default to 0 (GAP)")
 
 if __name__ == "__main__":
-    run_tests()
+    unittest.main()
