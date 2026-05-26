@@ -46,6 +46,9 @@ class BlueAgent:
             "| inputlookup mitre_all_rule_compliance_lookup.csv",
             max_results=1000
         )
+
+        rows = rows or []
+
         print(f"   raw rows returned: {len(rows)}")
         return rows
 
@@ -53,6 +56,9 @@ class BlueAgent:
         coverage_map = {}
 
         for row in rows:
+            # silently skip any rows that aren't dicts or don't have the expected fields
+            if not isinstance(row, dict):
+                continue
             tid  = row.get("technique_id", "").strip().rstrip(",").strip()
             name = row.get("technique_name", "").strip()
 
