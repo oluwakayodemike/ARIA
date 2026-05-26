@@ -11,6 +11,8 @@ class BlueAgent:
     PARTIAL = "PARTIAL"
     GAP     = "GAP"
 
+    # keys are the string values of the coverage verdicts, values are their relative weights for scoring purposes.
+    # must stay in sync if constants are changed.
     VERDICT_WEIGHT = {
         COVERED: 3,
         PARTIAL: 2,
@@ -22,9 +24,13 @@ class BlueAgent:
 
     def run(self) -> dict:
         print("\n Blue Agent - starting coverage audit...")
-        raw          = self._fetch_lookup()
-        coverage_map = self._build_coverage_map(raw)
-        score        = self._compute_score(coverage_map)
+        try:
+            raw          = self._fetch_lookup()
+            coverage_map = self._build_coverage_map(raw)
+            score        = self._compute_score(coverage_map)
+        except Exception as e:
+            print(f"   Blue Agent failed: {e}")
+            return {"coverage_map": {}, "score": {"score": 0, "covered": 0, "partial": 0, "gaps": 0, "total": 0}, "error": str(e)}
 
         print(f"   Techniques audited : {score['total']}")
         print(f"   Covered         : {score['covered']}")
@@ -60,6 +66,8 @@ class BlueAgent:
             except (ValueError, TypeError):
                 total_rules = enabled_rules = 0
                 enabled_pct = 0.0
+
+            enabled_rules = min(enabled_rules, total_rules)
 
             # determine Verdict
             if enabled_rules > 0:
