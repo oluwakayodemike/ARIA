@@ -23,7 +23,7 @@ class BlueAgent:
         self.client = splunk_client
 
     def run(self) -> dict:
-        print("\n Blue Agent - starting coverage audit...")
+        print("\nBlue Agent - starting coverage audit...")
         try:
             raw          = self._fetch_lookup()
             coverage_map = self._build_coverage_map(raw)
@@ -74,6 +74,12 @@ class BlueAgent:
                 enabled_pct = 0.0
 
             enabled_rules = min(enabled_rules, total_rules)
+
+            # recalculate pct after clamping
+            if total_rules > 0:
+                enabled_pct = round((enabled_rules / total_rules) * 100, 1)
+            else:
+                enabled_pct = 0.0
 
             # determine Verdict
             if enabled_rules > 0:

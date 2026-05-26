@@ -4,5 +4,5 @@ python-dotenv
 fastapi
 uvicorn
 websockets
-aiohttp
+httpx
 stix2
