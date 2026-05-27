@@ -72,7 +72,7 @@ class BlueAgent:
             if not isinstance(row, dict):
                 continue
 
-            tid = row.get("technique_id", "").strip().rstrip(",").strip()
+            tid = row.get("technique_id", "").strip().rstrip(",").strip().upper()
             if not tid or not tid.startswith("T") or "," in tid:
                 continue
 
@@ -93,12 +93,15 @@ class BlueAgent:
             # keep best verdict if duplicate
             if tid in splunk_map:
                 existing = splunk_map[tid]
-                new_weight = self.VERDICT_WEIGHT.get(
-                    self._verdict(enabled_rules, total_rules), 1)
-                old_weight = self.VERDICT_WEIGHT.get(
-                    self._verdict(existing["enabled_rules"],
-                                  existing["total_rules"]), 1)
-                if new_weight <= old_weight:
+                
+                new_verdict = self._verdict(enabled_rules, total_rules)
+                old_verdict = self._verdict(existing["enabled_rules"], existing["total_rules"])
+
+                # rank by verdict weight, then enabled rules, then total rules
+                new_score = (self.VERDICT_WEIGHT.get(new_verdict, 1), enabled_rules, total_rules)
+                old_score = (self.VERDICT_WEIGHT.get(old_verdict, 1), existing["enabled_rules"], existing["total_rules"])
+
+                if new_score <= old_score:
                     continue
 
             splunk_map[tid] = {
