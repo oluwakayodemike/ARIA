@@ -32,7 +32,10 @@ class MitreLoader:
             return
 
         print("🌐 MITRE dataset not found locally. Downloading from official repository...")
-        os.makedirs(DATA_DIR, exist_ok=True)
+        parent_dir = os.path.dirname(self.path)
+        if parent_dir:
+             os.makedirs(parent_dir, exist_ok=True)
+
 
         try:
             self._download_with_progress(ATTACK_DATA_URL, self.path)
@@ -150,12 +153,12 @@ class MitreLoader:
 
     def _extract_tactics(self, obj: dict) -> list:
         return [
-            phase["phase_name"]
+            phase_name
             for phase in obj.get("kill_chain_phases", [])
             if phase.get("kill_chain_name") == "mitre-attack"
-            and phase["phase_name"] in self.CANONICAL_TACTICS
+            and (phase_name := phase.get("phase_name")) in self.CANONICAL_TACTICS
         ]
-
+    
     def _extract_detection(self, obj: dict) -> str:
         detection = obj.get("x_mitre_detection", "") or ""
         return detection.strip()[:1000]
