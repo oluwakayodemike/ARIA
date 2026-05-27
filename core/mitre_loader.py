@@ -7,11 +7,20 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 ATTACK_DATA_PATH = os.path.join(DATA_DIR, "attack.json")
 ATTACK_DATA_URL = "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
 
+
 class MitreLoader:
     """
     Loads and parses the official MITRE ATT&CK STIX dataset.
     Provides clean technique objects for attack simulation, retrieval, and analysis.
     """
+
+    CANONICAL_TACTICS = {
+        "reconnaissance", "resource-development", "initial-access",
+        "execution", "persistence", "privilege-escalation",
+        "defense-evasion", "credential-access", "discovery",
+        "lateral-movement", "collection", "command-and-control",
+        "exfiltration", "impact"
+    }
 
     def __init__(self, path: str = ATTACK_DATA_PATH):
         self.path = path
@@ -144,6 +153,7 @@ class MitreLoader:
             phase["phase_name"]
             for phase in obj.get("kill_chain_phases", [])
             if phase.get("kill_chain_name") == "mitre-attack"
+            and phase["phase_name"] in self.CANONICAL_TACTICS
         ]
 
     def _extract_detection(self, obj: dict) -> str:

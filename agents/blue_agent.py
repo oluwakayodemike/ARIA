@@ -1,4 +1,5 @@
 from core.splunk_client import SplunkClient
+from core.mitre_loader import MitreLoader
 
 class BlueAgent:
     """
@@ -19,18 +20,24 @@ class BlueAgent:
         GAP: 1
     }
 
-    def __init__(self, splunk_client: SplunkClient):
+    def __init__(self, splunk_client: SplunkClient, mitre_loader: MitreLoader = None):
         self.client = splunk_client
+        self.mitre = mitre_loader or MitreLoader()
 
     def run(self) -> dict:
         print("\nBlue Agent - starting coverage audit...")
         try:
-            raw          = self._fetch_lookup()
-            coverage_map = self._build_coverage_map(raw)
-            score        = self._compute_score(coverage_map)
+            all_techniques   = self._load_all_techniques()
+            splunk_coverage  = self._fetch_lookup()
+            coverage_map     = self._build_coverage_map(all_techniques, splunk_coverage)
+            score            = self._compute_score(coverage_map)
         except Exception as e:
             print(f"   Blue Agent failed: {e}")
-            return {"coverage_map": {}, "score": {"score": 0, "covered": 0, "partial": 0, "gaps": 0, "total": 0}, "error": str(e)}
+            return {
+                "coverage_map": {}, 
+                "score": {"score": 0, "covered": 0, "partial": 0, "gaps": 0, "total": 0}, 
+                "error": str(e)
+            }
 
         print(f"   Techniques audited : {score['total']}")
         print(f"   Covered         : {score['covered']}")
@@ -40,28 +47,32 @@ class BlueAgent:
 
         return {"coverage_map": coverage_map, "score": score}
 
-    def _fetch_lookup(self) -> list:
-        print("   querying MITRE ATT&CK compliance lookup...")
+    def _load_all_techniques(self) -> dict:
+        """Load every known ATT&CK technique. These are the ground truth."""
+        print("   Loading full ATT&CK technique list...")
+        techniques = self.mitre.load()
+        # keyed by technique_id for fast lookup
+        return {t["technique_id"]: t for t in techniques}
+    
+    def _fetch_lookup(self) -> dict:
+        """
+        fetch what Splunk currently knows about.
+        returns a dict keyed by technique_id.
+        """
+        print("   Querying MITRE ATT&CK compliance lookup...")
         rows = self.client.run_search(
             "| inputlookup mitre_all_rule_compliance_lookup.csv",
             max_results=1000
         )
-
         rows = rows or []
+        print(f"   Splunk lookup rows returned: {len(rows)}")
 
-        print(f"   raw rows returned: {len(rows)}")
-        return rows
-
-    def _build_coverage_map(self, rows: list) -> dict:
-        coverage_map = {}
-
+        splunk_map = {}
         for row in rows:
-            # silently skip any rows that aren't dicts or don't have the expected fields
             if not isinstance(row, dict):
                 continue
-            tid  = row.get("technique_id", "").strip().rstrip(",").strip()
-            name = row.get("technique_name", "").strip()
 
+            tid = row.get("technique_id", "").strip().rstrip(",").strip()
             if not tid or not tid.startswith("T") or "," in tid:
                 continue
 
@@ -74,30 +85,54 @@ class BlueAgent:
                 enabled_pct = 0.0
 
             enabled_rules = min(enabled_rules, total_rules)
-
-            # recalculate pct after clamping
             if total_rules > 0:
                 enabled_pct = round((enabled_rules / total_rules) * 100, 1)
             else:
                 enabled_pct = 0.0
 
-            # determine Verdict
-            if enabled_rules > 0:
-                verdict = self.COVERED
-            elif total_rules > 0:
-                verdict = self.PARTIAL
-            else:
-                verdict = self.GAP
-
-            # duplicate conflict resolution - if the same technique appears multiple times, keep the one with the highest verdict
-            if tid in coverage_map:
-                existing_verdict = coverage_map[tid]["verdict"]
-                if self.VERDICT_WEIGHT[verdict] <= self.VERDICT_WEIGHT[existing_verdict]:
+            # keep best verdict if duplicate
+            if tid in splunk_map:
+                existing = splunk_map[tid]
+                new_weight = self.VERDICT_WEIGHT.get(
+                    self._verdict(enabled_rules, total_rules), 1)
+                old_weight = self.VERDICT_WEIGHT.get(
+                    self._verdict(existing["enabled_rules"],
+                                  existing["total_rules"]), 1)
+                if new_weight <= old_weight:
                     continue
+
+            splunk_map[tid] = {
+                "total_rules"       : total_rules,
+                "enabled_rules"     : enabled_rules,
+                "enabled_percentage": enabled_pct,
+            }
+
+        return splunk_map
+
+    def _build_coverage_map(self, all_techniques: dict, splunk_coverage: dict) -> dict:
+        """
+        Merge ALL ATT&CK techniques with Splunk's coverage data.
+        Techniques absent from Splunk become TRUE GAPS.
+        """
+        coverage_map = {}
+
+        for tid, technique in all_techniques.items():
+            splunk_data   = splunk_coverage.get(tid)
+
+            if splunk_data:
+                total_rules   = splunk_data["total_rules"]
+                enabled_rules = splunk_data["enabled_rules"]
+                enabled_pct   = splunk_data["enabled_percentage"]
+            else:
+                total_rules = enabled_rules = 0
+                enabled_pct = 0.0
+
+            verdict = self._verdict(enabled_rules, total_rules)
 
             coverage_map[tid] = {
                 "technique_id"      : tid,
-                "technique_name"    : name,
+                "technique_name"    : technique["name"],
+                "tactics"           : technique["tactics"],
                 "verdict"           : verdict,
                 "total_rules"       : total_rules,
                 "enabled_rules"     : enabled_rules,
@@ -105,6 +140,13 @@ class BlueAgent:
             }
 
         return coverage_map
+
+    def _verdict(self, enabled_rules: int, total_rules: int) -> str:
+        if enabled_rules > 0:
+            return self.COVERED
+        if total_rules > 0:
+            return self.PARTIAL
+        return self.GAP
 
     def _compute_score(self, coverage_map: dict) -> dict:
         total = len(coverage_map)
