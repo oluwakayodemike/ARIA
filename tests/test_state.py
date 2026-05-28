@@ -108,12 +108,13 @@ class TestARIAState(unittest.TestCase):
         state.update_from_blue(SAMPLE_COVERAGE, SAMPLE_SCORE)
         state.log("BlueAgent", "audit complete")
 
+        payload = state.to_dict()
+
         try:
-            json.dumps(state.to_dict())
+            json.dumps(payload)
         except TypeError as e:
             self.fail(f"to_dict() is not JSON serializable: {e}")
 
-        payload = state.to_dict()
         self.assertIn("techniques", payload)
         self.assertIn("T1059", payload["techniques"])
         self.assertIn("verdict", payload["techniques"]["T1059"])
@@ -135,6 +136,24 @@ class TestARIAState(unittest.TestCase):
         state.mark_complete()
         self.assertEqual(state.phase, "done")
         self.assertIsNotNone(state.completed_at)
+
+    def test_update_from_blue_called_twice_replaces_state(self):
+        state = ARIAState()
+        state.update_from_blue(SAMPLE_COVERAGE, SAMPLE_SCORE)
+        self.assertIn("T1566", state.techniques)
+
+        # second call with completely different data
+        new_coverage = {
+            "T1110": {"technique_id": "T1110", "technique_name": "Brute Force",
+                    "tactics": ["credential-access"], "verdict": "GAP",
+                    "total_rules": 0, "enabled_rules": 0, "enabled_percentage": 0.0}
+        }
+        new_score = {"score": 0.0, "covered": 0, "partial": 0, "gaps": 1, "total": 1}
+        state.update_from_blue(new_coverage, new_score)
+
+        self.assertNotIn("T1566", state.techniques, "Stale techniques must be cleared")
+        self.assertIn("T1110", state.techniques)
+        self.assertEqual(state.gap_count, 1)
 
 if __name__ == "__main__":
     unittest.main()
