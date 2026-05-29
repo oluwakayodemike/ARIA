@@ -140,6 +140,8 @@ class BlueAgent:
                 "total_rules"       : total_rules,
                 "enabled_rules"     : enabled_rules,
                 "enabled_percentage": enabled_pct,
+                "description"       : technique.get("description", ""),
+                "detection"         : technique.get("detection", ""), 
             }
 
         return coverage_map

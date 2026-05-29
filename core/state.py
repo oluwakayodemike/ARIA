@@ -26,6 +26,10 @@ class TechniqueState:
     enabled_rules     : int   = 0
     enabled_percentage: float = 0.0
 
+    # MITRE source data populated by Blue Agent and read by Red Agent
+    description       : str   = ""
+    detection         : str   = ""
+
     attack_profile    : Optional[dict] = None
 
     generated_rule    : Optional[str]  = None
@@ -47,6 +51,8 @@ class TechniqueState:
             "total_rules"       : self.total_rules,
             "enabled_rules"     : self.enabled_rules,
             "enabled_percentage": self.enabled_percentage,
+            "description"       : self.description,
+            "detection"         : self.detection,
             "attack_profile"    : self.attack_profile,
             "generated_rule"    : self.generated_rule,
             "rule_explanation"  : self.rule_explanation,
@@ -118,6 +124,8 @@ class ARIAState:
                 total_rules        = data["total_rules"],
                 enabled_rules      = data["enabled_rules"],
                 enabled_percentage = data["enabled_percentage"],
+                description        = data.get("description", ""),
+                detection          = data.get("detection", ""),
             )
 
     def mark_complete(self):
