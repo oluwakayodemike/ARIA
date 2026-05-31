@@ -6,3 +6,4 @@ uvicorn
 websockets
 httpx
 stix2
+google-genai==0.6.0

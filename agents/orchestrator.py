@@ -85,8 +85,8 @@ class Orchestrator:
             if not technique or not technique.pending_approval:
                 self.state.log(
                     "Orchestrator",
-                    f"Rule state changed during deployment for {technique_id}",
-                    level="warning"
+                    f"Approve requested for {technique_id} but it is not pending approval",
+                    level="info"
                 )
                 return False
 

@@ -84,7 +84,7 @@ class ARIAState:
     partial_count   : int   = 0
     gap_count       : int   = 0
 
-    phase           : str   = "idle"  # idle | auditing | profiling | generating | awaiting_approval | done
+    phase           : str   = "idle"  # idle | auditing | profiling | generating | awaiting_approval | done | error
     errors          : list  = field(default_factory=list)
 
     reasoning_log   : list  = field(default_factory=list)
