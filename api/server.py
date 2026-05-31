@@ -35,7 +35,7 @@ async def _broadcast_loop():
                     except Exception:
                         dead.add(ws)
 
-                _ws_clients -= dead
+                _ws_clients.difference_update(dead)
         except Exception:
             logging.exception("Broadcast loop tick failed")
 
@@ -212,12 +212,3 @@ async def websocket_endpoint(websocket: WebSocket):
         pass
     finally:
         _ws_clients.discard(websocket)
-
-if __name__ == "__main__":
-    uvicorn.run(
-        "api.server:app",
-        host    = "0.0.0.0",
-        port    = 8080,
-        reload  = False,
-        workers = 1,  # must be 1 - in-memory state is not process-safe
-    )
