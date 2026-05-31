@@ -1,4 +1,6 @@
 import uuid
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
@@ -69,7 +71,7 @@ class ARIAState:
     """
     Single source of truth for the entire ARIA pipeline.
     Orchestrator owns this. All agents receive it and return updates.
-    Never mutated directly by agents, only the Orchestrator writes to it.
+    Thread-safe: all reads and writes go through the state lock.
     """
     run_id          : str  = field(default_factory=_run_id)
     started_at      : str  = field(default_factory=_utcnow)
@@ -87,6 +89,16 @@ class ARIAState:
 
     reasoning_log   : list  = field(default_factory=list)
 
+    def __post_init__(self):
+        # RLock allows nested acquisition across helper methods.
+        self._state_lock = threading.RLock()
+
+    @contextmanager
+    def locked(self):
+        """Context manager for safely mutating or reading state."""
+        with self._state_lock:
+            yield
+
     def log(self, agent: str, message: str, level: str = "info"):
         """
         append a reasoning log entry.
@@ -98,82 +110,95 @@ class ARIAState:
             "level"    : level,
             "message"  : message,
         }
-        self.reasoning_log.append(entry)
+        with self._state_lock:
+            self.reasoning_log.append(entry)
 
-        if level == "error":
-            self.errors.append(entry.copy())
+            if level == "error":
+                self.errors.append(entry.copy())
 
         print(f"  [{agent}] {message}")
 
     def update_from_blue(self, coverage_map: dict, score: dict):
         """Orchestrator calls this after Blue Agent runs."""
-        self.coverage_score   = score["score"]
-        self.total_techniques = score["total"]
-        self.covered_count    = score["covered"]
-        self.partial_count    = score["partial"]
-        self.gap_count        = score["gaps"]
+        with self._state_lock:
+            self.coverage_score   = score["score"]
+            self.total_techniques = score["total"]
+            self.covered_count    = score["covered"]
+            self.partial_count    = score["partial"]
+            self.gap_count        = score["gaps"]
 
-        self.techniques.clear()
+            self.techniques.clear()
 
-        for tid, data in coverage_map.items():
-            self.techniques[tid] = TechniqueState(
-                technique_id       = data["technique_id"],
-                technique_name     = data["technique_name"],
-                tactics            = data.get("tactics") or [],
-                verdict            = data["verdict"],
-                total_rules        = data["total_rules"],
-                enabled_rules      = data["enabled_rules"],
-                enabled_percentage = data["enabled_percentage"],
-                description        = data.get("description", ""),
-                detection          = data.get("detection", ""),
-            )
+            for tid, data in coverage_map.items():
+                self.techniques[tid] = TechniqueState(
+                    technique_id       = data["technique_id"],
+                    technique_name     = data["technique_name"],
+                    tactics            = data.get("tactics") or [],
+                    verdict            = data["verdict"],
+                    total_rules        = data["total_rules"],
+                    enabled_rules      = data["enabled_rules"],
+                    enabled_percentage = data["enabled_percentage"],
+                    description        = data.get("description", ""),
+                    detection          = data.get("detection", ""),
+                )
 
     def mark_complete(self):
         """Orchestrator calls this when the full pipeline finishes."""
-        self.completed_at = _utcnow()
-        self.phase        = "done"
+        with self._state_lock:
+            self.completed_at = _utcnow()
+            self.phase        = "done"
+
+    def set_phase(self, phase: str):
+        """Set the pipeline phase in a thread-safe way."""
+        with self._state_lock:
+            self.phase = phase
 
     def get_gaps(self) -> list[TechniqueState]:
         """All GAP techniques - fed to Red Agent then Gap Agent."""
-        return [t for t in self.techniques.values() if t.verdict == "GAP"]
+        with self._state_lock:
+            return [t for t in self.techniques.values() if t.verdict == "GAP"]
 
     def get_partials(self) -> list[TechniqueState]:
         """Techniques with rules that exist but are all disabled."""
-        return [t for t in self.techniques.values() if t.verdict == "PARTIAL"]
+        with self._state_lock:
+            return [t for t in self.techniques.values() if t.verdict == "PARTIAL"]
 
     def get_pending_approvals(self) -> list[TechniqueState]:
         """Rules staged by Gap Agent, awaiting human approval."""
-        return [t for t in self.techniques.values() if t.pending_approval]
+        with self._state_lock:
+            return [t for t in self.techniques.values() if t.pending_approval]
 
     def to_summary(self) -> dict:
         """Lightweight snapshot the API broadcasts to the frontend."""
-        return {
-            "run_id"           : self.run_id,
-            "phase"            : self.phase,
-            "coverage_score"   : self.coverage_score,
-            "total_techniques" : self.total_techniques,
-            "covered_count"    : self.covered_count,
-            "partial_count"    : self.partial_count,
-            "gap_count"        : self.gap_count,
-            "pending_approvals": len(self.get_pending_approvals()),
-            "error_count"      : len(self.errors),
-            "reasoning_log"    : [e.copy() for e in self.reasoning_log[-20:]],
-        }
+        with self._state_lock:
+            return {
+                "run_id"           : self.run_id,
+                "phase"            : self.phase,
+                "coverage_score"   : self.coverage_score,
+                "total_techniques" : self.total_techniques,
+                "covered_count"    : self.covered_count,
+                "partial_count"    : self.partial_count,
+                "gap_count"        : self.gap_count,
+                "pending_approvals": len(self.get_pending_approvals()),
+                "error_count"      : len(self.errors),
+                "reasoning_log"    : [e.copy() for e in self.reasoning_log[-20:]],
+            }
 
     def to_dict(self) -> dict:
         """Full JSON-serializable state dump. Used for persistence and debugging."""
-        return {
-            "run_id"          : self.run_id,
-            "started_at"      : self.started_at,
-            "completed_at"    : self.completed_at,
-            "phase"           : self.phase,
-            "coverage_score"  : self.coverage_score,
-            "total_techniques": self.total_techniques,
-            "covered_count"   : self.covered_count,
-            "partial_count"   : self.partial_count,
-            "gap_count"       : self.gap_count,
-            "errors"          : [e.copy() for e in self.errors],
-            "reasoning_log"   : [e.copy() for e in self.reasoning_log],
-            "techniques"      : {tid: t.to_dict()
-                                 for tid, t in self.techniques.items()},
-        }
+        with self._state_lock:
+            return {
+                "run_id"          : self.run_id,
+                "started_at"      : self.started_at,
+                "completed_at"    : self.completed_at,
+                "phase"           : self.phase,
+                "coverage_score"  : self.coverage_score,
+                "total_techniques": self.total_techniques,
+                "covered_count"   : self.covered_count,
+                "partial_count"   : self.partial_count,
+                "gap_count"       : self.gap_count,
+                "errors"          : [e.copy() for e in self.errors],
+                "reasoning_log"   : [e.copy() for e in self.reasoning_log],
+                "techniques"      : {tid: t.to_dict()
+                                     for tid, t in self.techniques.items()},
+            }

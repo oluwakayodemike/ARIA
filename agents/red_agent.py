@@ -24,7 +24,7 @@ class RedAgent:
         gaps = state.get_gaps()
 
         state.log("RedAgent", f"Starting attack profiling — {len(gaps)} techniques to profile")
-        state.phase = "profiling"
+        state.set_phase("profiling")
 
         if not gaps:
             state.log("RedAgent", "No gaps found — nothing to profile", level="info")
@@ -36,7 +36,8 @@ class RedAgent:
         for technique in gaps:
             try:
                 profile = self._build_profile(technique)
-                technique.attack_profile = profile
+                with state.locked():
+                    technique.attack_profile = profile
                 profiled += 1
                 state.log(
                     "RedAgent",

@@ -39,7 +39,7 @@ class GapAgent:
         self.ai = genai.Client(api_key=api_key)
 
     def run(self, state: ARIAState, limit: int = 5) -> ARIAState:
-        state.phase = "generating"
+        state.set_phase("generating")
 
         candidates = [
             t for t in state.get_gaps()
@@ -95,10 +95,11 @@ class GapAgent:
             validation = self.splunk.validate_spl(rule_spl)
 
             if validation["valid"]:
-                technique.generated_rule   = validation["normalized"]
-                technique.rule_explanation = explanation
-                technique.rule_confidence  = confidence
-                technique.pending_approval = True
+                with state.locked():
+                    technique.generated_rule   = validation["normalized"]
+                    technique.rule_explanation = explanation
+                    technique.rule_confidence  = confidence
+                    technique.pending_approval = True
                 state.log(
                     "GapAgent",
                     f"rule validated for {technique.technique_id} "
