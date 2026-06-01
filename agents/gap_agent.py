@@ -29,7 +29,7 @@ class GapAgent:
     MAX_RETRIES   = 2    # fix attempts after the initial generation
     REQUEST_DELAY = 0.5
 
-    def __init__(self, splunk_client: SplunkClient, model_name: str = "gemini-3.5-flash"):
+    def __init__(self, splunk_client: SplunkClient, model_name: str = "gemini-2.5-flash"):
         self.splunk     = splunk_client
         self.model_name = model_name
 
