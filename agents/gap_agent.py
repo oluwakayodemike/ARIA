@@ -29,7 +29,7 @@ class GapAgent:
     MAX_RETRIES   = 2    # fix attempts after the initial generation
     REQUEST_DELAY = 0.5
 
-    def __init__(self, splunk_client: SplunkClient, model_name: str = "gemini-2.5-flash"):
+    def __init__(self, splunk_client: SplunkClient, model_name: str = "gemini-3.5-flash"):
         self.splunk     = splunk_client
         self.model_name = model_name
 
@@ -91,6 +91,17 @@ class GapAgent:
 
             if not rule_spl:
                 raise ValueError("AI returned an empty SPL rule.")
+
+            regex_error = self._check_regex_sanity(rule_spl)
+            if regex_error:
+                previous_error = regex_error
+                state.log(
+                    "GapAgent",
+                    f"SPL invalid for {technique.technique_id} "
+                    f"(attempt {attempt}): {previous_error}",
+                    level="warning"
+                )
+                continue
 
             validation = self.splunk.validate_spl(rule_spl)
 
@@ -158,6 +169,8 @@ class GapAgent:
             - Do NOT use backtick macros — write literal SPL only
             - Target realistic log sources from the log sources listed above
             - Avoid overly broad searches — always include at least one meaningful filter
+            - Avoid regex unless absolutely necessary; prefer field=value or field IN (...) filters
+            - If regex is required, ensure balanced parentheses and escape backslashes
         """).strip()
 
         if previous_error:
@@ -170,3 +183,13 @@ class GapAgent:
             prompt += f"\n\n{correction}"
 
         return prompt
+
+    def _check_regex_sanity(self, rule_spl: str) -> str | None:
+        lower = rule_spl.lower()
+        if "regex" not in lower:
+            return None
+
+        if rule_spl.count("(") != rule_spl.count(")"):
+            return "Regex has unbalanced parentheses. Avoid regex or fix the pattern."
+
+        return None
