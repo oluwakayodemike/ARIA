@@ -1,13 +1,13 @@
 export type Phase =
-  | 'idle'
-  | 'auditing'
-  | 'profiling'
-  | 'generating'
-  | 'awaiting_approval'
-  | 'done'
-  | 'error'
+  | "idle"
+  | "auditing"
+  | "profiling"
+  | "generating"
+  | "awaiting_approval"
+  | "done"
+  | "error"
 
-export type LogLevel = 'info' | 'warning' | 'error'
+export type LogLevel = "info" | "warning" | "error"
 
 export interface ReasoningLogEntry {
   timestamp: string
@@ -29,10 +29,16 @@ export interface StateSummary {
   reasoning_log: ReasoningLogEntry[]
 }
 
+export interface HealthResponse {
+  status: "ok"
+  is_running: boolean
+  phase: Phase
+}
+
 export interface Technique {
   technique_id: string
   technique_name: string
-  verdict: 'COVERED' | 'PARTIAL' | 'GAP' | string
+  verdict: "COVERED" | "PARTIAL" | "GAP" | string
   tactics: string[]
   total_rules: number
   enabled_rules: number
@@ -60,17 +66,17 @@ export interface PendingResponse {
 }
 
 export interface RunResponse {
-  status: 'started'
+  status: "started"
   gap_limit: number
 }
 
 export interface ApproveResponse {
-  status: 'approved'
+  status: "approved"
   technique_id: string
 }
 
 export interface RejectResponse {
-  status: 'rejected'
+  status: "rejected"
   technique_id: string
 }
 

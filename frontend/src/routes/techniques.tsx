@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Link, createFileRoute } from "@tanstack/react-router"
+import { Link, Outlet, createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { api } from "../api/client"
 import { queryKeys } from "../lib/queryKeys"
@@ -122,6 +122,13 @@ function TechniquesPage() {
           </table>
         </div>
       )}
+
+      <section className="space-y-2">
+        <p className="muted-label">Technique Inspector</p>
+        <div className="glass-card p-4">
+          <Outlet />
+        </div>
+      </section>
     </section>
   )
 }

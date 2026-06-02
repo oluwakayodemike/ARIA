@@ -7,6 +7,7 @@ import type {
   StateSummary,
   Technique,
   TechniquesResponse,
+  HealthResponse,
 } from "../types/api"
 
 const API_BASE_URL =
@@ -58,6 +59,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  getHealth: () => request<HealthResponse>("/api/health"),
+
   getState: () => request<StateSummary>("/api/state"),
 
   startRun: (gapLimit = 10) =>
