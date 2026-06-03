@@ -1,6 +1,12 @@
 import splunklib.client as client
-import splunklib.results as results
-from config import SPLUNK_HOST, SPLUNK_PORT, SPLUNK_USERNAME, SPLUNK_PASSWORD, SPLUNK_SCHEME
+
+from config import (
+    SPLUNK_HOST,
+    SPLUNK_PASSWORD,
+    SPLUNK_PORT,
+    SPLUNK_SCHEME,
+    SPLUNK_USERNAME,
+)
 
 
 class SplunkClient:
@@ -15,7 +21,7 @@ class SplunkClient:
                 port=SPLUNK_PORT,
                 username=SPLUNK_USERNAME,
                 password=SPLUNK_PASSWORD,
-                scheme=SPLUNK_SCHEME
+                scheme=SPLUNK_SCHEME,
             )
             print(f"connected to Splunk - version {self.service.info['version']}")
             return True
@@ -34,26 +40,43 @@ class SplunkClient:
         searches = []
         for search in self.service.saved_searches:
             content = search.content
-            searches.append({
-                "name": search.name,
-                "query": content.get("search", ""),
-                "tags": content.get("tags", ""),
-                "description": content.get("description", ""),
-                "annotations": content.get("action.correlationsearch.annotations", ""),
-                "mitre_technique": content.get("action.risk.param._risk_object", ""),
-                "disabled": content.get("disabled", "0"),
-            })
+            searches.append(
+                {
+                    "name": search.name,
+                    "query": content.get("search", ""),
+                    "tags": content.get("tags", ""),
+                    "description": content.get("description", ""),
+                    "annotations": content.get(
+                        "action.correlationsearch.annotations", ""
+                    ),
+                    "mitre_technique": content.get(
+                        "action.risk.param._risk_object", ""
+                    ),
+                    "disabled": content.get("disabled", "0"),
+                }
+            )
         return searches
 
     def validate_spl(self, spl_query):
         """validate SPL using the native Splunk SDK parser."""
         import splunklib.client as splunk_client
 
+        if not self.service:
+            return {
+                "valid": False,
+                "error": "Not connected to Splunk. call connect() first.",
+                "normalized": spl_query.strip(),
+            }
+
         def normalize(q):
             q = q.strip()
             generating_commands = (
-                "search ", "tstats ", "inputlookup ",
-                "makeresults", "rest ", "|"
+                "search ",
+                "tstats ",
+                "inputlookup ",
+                "makeresults",
+                "rest ",
+                "|",
             )
             if any(q.startswith(cmd) for cmd in generating_commands):
                 return q
@@ -71,20 +94,32 @@ class SplunkClient:
 
         except Exception as e:
             # anthing else = genuine connection or config problem
-            return {"valid": False, "error": f"Unexpected error: {str(e)}", "normalized": normalized}
+            return {
+                "valid": False,
+                "error": f"Unexpected error: {str(e)}",
+                "normalized": normalized,
+            }
 
-    def create_saved_search(self, name, query, description="", tags=""):
+    def create_saved_search(self, name, query, description=""):
         """
         stage an approved rule into Splunk as a saved search.
         called ONLY after human approval in the UI.
         """
+        if not self.service:
+            print("failed to stage rule: not connected to Splunk")
+            return False
+
         try:
+            kwargs: dict[str, object] = {
+                "is_scheduled": False,  # human can enable scheduling post-review
+            }
+            if description:
+                kwargs["description"] = description
+
             self.service.saved_searches.create(
                 name,
                 query,
-                description=description,
-                tags=tags,
-                is_scheduled=False,  # human can enable scheduling post-review
+                **kwargs,
             )
             print(f"rule staged: {name}")
             return True
@@ -95,14 +130,17 @@ class SplunkClient:
     def run_search(self, spl_query, max_results=100):
         """run a one-shot search and return results."""
         import json
+
+        if not self.service:
+            print("[-] run_search failed: not connected to Splunk")
+            return []
+
         # we must explicitly request JSON, otherwise Splunk defaults to XML [and the SDK doesn't parse it right]
         try:
             response = self.service.jobs.oneshot(
-                spl_query, 
-                count=max_results, 
-                output_mode="json"
+                spl_query, count=max_results, output_mode="json"
             )
-            data = json.loads(response.read().decode('utf-8'))
+            data = json.loads(response.read().decode("utf-8"))
             return data.get("results", [])
         except Exception as e:
             print(f"[-] run_search failed: {e}")

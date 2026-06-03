@@ -1,13 +1,13 @@
 import logging
 import threading
-from typing import Optional, Callable
+from typing import Callable, Optional
 
-from core.state import ARIAState
-from core.splunk_client import SplunkClient
-from core.mitre_loader import MitreLoader
 from agents.blue_agent import BlueAgent
-from agents.red_agent import RedAgent
 from agents.gap_agent import GapAgent
+from agents.red_agent import RedAgent
+from core.mitre_loader import MitreLoader
+from core.splunk_client import SplunkClient
+from core.state import ARIAState
 
 
 class Orchestrator:
@@ -26,21 +26,21 @@ class Orchestrator:
 
     def __init__(
         self,
-        splunk_client : SplunkClient,
-        gap_agent     : GapAgent,
-        mitre_loader  : Optional[MitreLoader] = None,
+        splunk_client: SplunkClient,
+        gap_agent: GapAgent,
+        mitre_loader: Optional[MitreLoader] = None,
         on_state_change: Optional[Callable[[dict], None]] = None,
     ):
-        self.splunk          = splunk_client
-        self.mitre           = mitre_loader or MitreLoader()
-        self.gap_agent       = gap_agent
+        self.splunk = splunk_client
+        self.mitre = mitre_loader or MitreLoader()
+        self.gap_agent = gap_agent
         self.on_state_change = on_state_change
 
         self.blue = BlueAgent(splunk_client, self.mitre)
-        self.red  = RedAgent()
+        self.red = RedAgent()
 
-        self.state      = ARIAState()
-        self._lock      = threading.Lock()
+        self.state = ARIAState()
+        self._lock = threading.Lock()
         self.is_running = False
 
     def run(self, gap_limit: int = 10) -> ARIAState:
@@ -86,12 +86,12 @@ class Orchestrator:
                 self.state.log(
                     "Orchestrator",
                     f"Approve requested for {technique_id} but it is not pending approval",
-                    level="info"
+                    level="info",
                 )
                 return False
 
-            rule           = technique.generated_rule
-            explanation    = technique.rule_explanation or ""
+            rule = technique.generated_rule
+            explanation = technique.rule_explanation or ""
             technique_name = technique.technique_name
 
             # reserve the approval to prevent double-deploys from concurrent requests.
@@ -101,7 +101,7 @@ class Orchestrator:
             self.state.log(
                 "Orchestrator",
                 f"Rule approval failed for {technique_id} - missing rule body",
-                level="error"
+                level="error",
             )
             with self.state.locked():
                 technique = self.state.techniques.get(technique_id)
@@ -119,7 +119,7 @@ class Orchestrator:
             self.state.log(
                 "Orchestrator",
                 f"Splunk deployment failed for {technique_id}",
-                level="error"
+                level="error",
             )
             with self.state.locked():
                 technique = self.state.techniques.get(technique_id)
@@ -136,7 +136,7 @@ class Orchestrator:
             technique.deployed = True
             self.state.log(
                 "Orchestrator",
-                f"Rule deployed and approved for {technique_id} - {technique.technique_name}"
+                f"Rule deployed and approved for {technique_id} - {technique.technique_name}",
             )
 
         self._notify()
@@ -155,10 +155,10 @@ class Orchestrator:
                 return False
 
             technique.pending_approval = False
-            technique.rejected         = True
-            technique.generated_rule   = None
+            technique.rejected = True
+            technique.generated_rule = None
             technique.rule_explanation = None
-            technique.rule_confidence  = None
+            technique.rule_confidence = None
 
             message = f"Rule rejected for {technique_id}"
             if reason:
@@ -194,7 +194,9 @@ class Orchestrator:
 
     def _run_blue(self):
         self.state.set_phase("auditing")
-        self.state.log("Orchestrator", "Starting Blue Agent - auditing Splunk coverage...")
+        self.state.log(
+            "Orchestrator", "Starting Blue Agent - auditing Splunk coverage..."
+        )
         self._notify()
 
         result = self.blue.run()
@@ -206,31 +208,33 @@ class Orchestrator:
         self.state.log(
             "Orchestrator",
             f"Blue Agent complete - {self.state.gap_count} gaps detected, "
-            f"score {self.state.coverage_score}%"
+            f"score {self.state.coverage_score}%",
         )
         self._notify()
 
     def _run_red(self):
-        self.state.log("Orchestrator", "Starting Red Agent - building attack profiles...")
+        self.state.log(
+            "Orchestrator", "Starting Red Agent - building attack profiles..."
+        )
         self._notify()
 
         self.red.run(self.state)
 
         with self.state.locked():
             profiled = sum(
-                1 for t in self.state.techniques.values()
+                1
+                for t in self.state.techniques.values()
                 if t.attack_profile is not None
             )
         self.state.log(
-            "Orchestrator",
-            f"Red Agent complete - {profiled} attack profiles generated"
+            "Orchestrator", f"Red Agent complete - {profiled} attack profiles generated"
         )
         self._notify()
 
     def _run_gap(self, gap_limit: int):
         self.state.log(
             "Orchestrator",
-            f"Starting Gap Agent - generating SPL rules for up to {gap_limit} gaps..."
+            f"Starting Gap Agent - generating SPL rules for up to {gap_limit} gaps...",
         )
         self._notify()
 
@@ -238,13 +242,14 @@ class Orchestrator:
 
         with self.state.locked():
             generated = sum(
-                1 for t in self.state.techniques.values()
+                1
+                for t in self.state.techniques.values()
                 if t.generated_rule is not None
             )
         self.state.set_phase("awaiting_approval")
         self.state.log(
             "Orchestrator",
-            f"Gap Agent complete - {generated} rules staged for approval"
+            f"Gap Agent complete - {generated} rules staged for approval",
         )
         self._notify()
 
