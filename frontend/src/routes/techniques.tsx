@@ -150,7 +150,10 @@ function TechniquesPage() {
                   </td>
                   <td className="px-4 py-3">{technique.technique_name}</td>
                   <td className="px-4 py-3">
-                    <span className={badgeClass(technique.verdict)}>
+                    <span
+                      className={badgeClass(technique.verdict)}
+                      title={verdictHelpText(technique.verdict)}
+                    >
                       {technique.verdict}
                     </span>
                   </td>
@@ -196,6 +199,18 @@ function TechniquesPage() {
       </section>
     </section>
   )
+}
+
+function verdictHelpText(verdict: string) {
+  if (verdict === "COVERED") {
+    return "COVERED: Splunk has at least one enabled detection mapped to this technique."
+  }
+
+  if (verdict === "PARTIAL") {
+    return "PARTIAL: Splunk has mapped rules for this technique, but enabled coverage is incomplete (for example 0/5 enabled)."
+  }
+
+  return "GAP: No mapped Splunk rules were found for this technique in the latest audit snapshot."
 }
 
 function badgeClass(verdict: string) {

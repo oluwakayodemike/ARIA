@@ -73,7 +73,11 @@ function TechniqueDetailPage() {
       </header>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <InfoPair label="Verdict" value={data.verdict} />
+        <InfoPair
+          label="Verdict"
+          value={data.verdict}
+          hint={verdictHelpText(data.verdict)}
+        />
         <InfoPair label="Tactics" value={data.tactics.join(", ") || "N/A"} />
         <InfoPair
           label="Enabled / Total (Splunk)"
@@ -152,14 +156,18 @@ function InfoPair({
   label,
   value,
   multiline = false,
+  hint,
 }: {
   label: string
   value: string
   multiline?: boolean
+  hint?: string
 }) {
   return (
     <div>
-      <p className="text-xs text-ink-muted">{label}</p>
+      <p className="text-xs text-ink-muted" title={hint}>
+        {label}
+      </p>
       <p
         className={multiline ? "mt-1 text-sm text-ink-primary" : "mt-1 text-sm"}
       >
@@ -167,6 +175,18 @@ function InfoPair({
       </p>
     </div>
   )
+}
+
+function verdictHelpText(verdict: string) {
+  if (verdict === "COVERED") {
+    return "COVERED: Splunk has at least one enabled detection mapped to this technique."
+  }
+
+  if (verdict === "PARTIAL") {
+    return "PARTIAL: Splunk has mapped rules for this technique, but enabled coverage is incomplete (for example 0/5 enabled)."
+  }
+
+  return "GAP: No mapped Splunk rules were found for this technique in the latest audit snapshot."
 }
 
 function statusLabel(technique: {
