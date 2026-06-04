@@ -65,14 +65,18 @@ function TechniqueDetailPage() {
           </h2>
           <span className={statusBadgeClass(data)}>{statusLabel(data)}</span>
         </div>
-        <p className="text-sm text-ink-secondary">{data.technique_name}</p>
+        <p className="mt-1 text-sm text-ink-secondary">{data.technique_name}</p>
+        <p className="text-xs text-ink-muted">
+          Coverage counts are sourced from Splunk audit data: enabled rules /
+          total mapped rules.
+        </p>
       </header>
 
       <div className="grid gap-3 sm:grid-cols-2">
         <InfoPair label="Verdict" value={data.verdict} />
         <InfoPair label="Tactics" value={data.tactics.join(", ") || "N/A"} />
         <InfoPair
-          label="Rules enabled / total"
+          label="Enabled / Total (Splunk)"
           value={`${data.enabled_rules}/${data.total_rules}`}
         />
         <InfoPair

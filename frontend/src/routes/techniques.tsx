@@ -117,7 +117,7 @@ function TechniquesPage() {
                 <th className="px-4 py-3">Technique</th>
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">Verdict</th>
-                <th className="px-4 py-3">Rules</th>
+                <th className="px-4 py-3">Enabled / Total (Splunk)</th>
                 <th className="px-4 py-3">Pending</th>
                 <th className="px-4 py-3">Confidence</th>
               </tr>
@@ -155,7 +155,9 @@ function TechniquesPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-ink-secondary">
-                    {technique.enabled_rules}/{technique.total_rules}
+                    <span className="font-mono">
+                      {technique.enabled_rules}/{technique.total_rules}
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     <span
