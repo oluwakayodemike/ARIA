@@ -1,5 +1,8 @@
-from core.splunk_client import SplunkClient
+import re
+
 from core.mitre_loader import MitreLoader
+from core.splunk_client import SplunkClient
+
 
 class BlueAgent:
     """
@@ -10,33 +13,41 @@ class BlueAgent:
 
     COVERED = "COVERED"
     PARTIAL = "PARTIAL"
-    GAP     = "GAP"
+    GAP = "GAP"
 
     # keys are the string values of the coverage verdicts, values are their relative weights for scoring purposes.
     # must stay in sync if constants are changed.
     VERDICT_WEIGHT = {
         COVERED: 3,
         PARTIAL: 2,
-        GAP: 1
+        GAP: 1,
     }
 
-    def __init__(self, splunk_client: SplunkClient, mitre_loader: MitreLoader = None):
+    def __init__(
+        self, splunk_client: SplunkClient, mitre_loader: MitreLoader | None = None
+    ):
         self.client = splunk_client
         self.mitre = mitre_loader or MitreLoader()
 
     def run(self) -> dict:
         print("\nBlue Agent - starting coverage audit...")
         try:
-            all_techniques   = self._load_all_techniques()
-            splunk_coverage  = self._fetch_lookup()
-            coverage_map     = self._build_coverage_map(all_techniques, splunk_coverage)
-            score            = self._compute_score(coverage_map)
+            all_techniques = self._load_all_techniques()
+            splunk_coverage = self._fetch_lookup()
+            coverage_map = self._build_coverage_map(all_techniques, splunk_coverage)
+            score = self._compute_score(coverage_map)
         except Exception as e:
             print(f"   Blue Agent failed: {e}")
             return {
-                "coverage_map": {}, 
-                "score": {"score": 0, "covered": 0, "partial": 0, "gaps": 0, "total": 0}, 
-                "error": str(e)
+                "coverage_map": {},
+                "score": {
+                    "score": 0,
+                    "covered": 0,
+                    "partial": 0,
+                    "gaps": 0,
+                    "total": 0,
+                },
+                "error": str(e),
             }
 
         print(f"   Techniques audited : {score['total']}")
@@ -53,16 +64,19 @@ class BlueAgent:
         techniques = self.mitre.load()
         # keyed by technique_id for fast lookup
         return {t["technique_id"]: t for t in techniques}
-    
+
     def _fetch_lookup(self) -> dict:
         """
-        fetch what Splunk currently knows about.
-        returns a dict keyed by technique_id.
+        Fetch what Splunk currently knows about.
+        Returns a dict keyed by technique_id.
+
+        Source 1: MITRE ATT&CK compliance lookup
+        Source 2: ARIA-deployed saved searches (name contains technique ID)
         """
         print("   Querying MITRE ATT&CK compliance lookup...")
         rows = self.client.run_search(
             "| inputlookup mitre_all_rule_compliance_lookup.csv",
-            max_results=1000
+            max_results=1000,
         )
         rows = rows or []
         print(f"   Splunk lookup rows returned: {len(rows)}")
@@ -77,9 +91,9 @@ class BlueAgent:
                 continue
 
             try:
-                total_rules   = int(row.get("count", 0))
+                total_rules = int(row.get("count", 0))
                 enabled_rules = int(row.get("enabled_count", 0))
-                enabled_pct   = float(row.get("enabled_percentage", 0))
+                enabled_pct = float(row.get("enabled_percentage", 0))
             except (ValueError, TypeError):
                 total_rules = enabled_rules = 0
                 enabled_pct = 0.0
@@ -93,24 +107,109 @@ class BlueAgent:
             # keep best verdict if duplicate
             if tid in splunk_map:
                 existing = splunk_map[tid]
-                
+
                 new_verdict = self._verdict(enabled_rules, total_rules)
-                old_verdict = self._verdict(existing["enabled_rules"], existing["total_rules"])
+                old_verdict = self._verdict(
+                    int(existing.get("enabled_rules", 0)),
+                    int(existing.get("total_rules", 0)),
+                )
 
                 # rank by verdict weight, then enabled rules, then total rules
-                new_score = (self.VERDICT_WEIGHT.get(new_verdict, 1), enabled_rules, total_rules)
-                old_score = (self.VERDICT_WEIGHT.get(old_verdict, 1), existing["enabled_rules"], existing["total_rules"])
+                new_score = (
+                    self.VERDICT_WEIGHT.get(new_verdict, 1),
+                    enabled_rules,
+                    total_rules,
+                )
+                old_score = (
+                    self.VERDICT_WEIGHT.get(old_verdict, 1),
+                    existing["enabled_rules"],
+                    existing["total_rules"],
+                )
 
                 if new_score <= old_score:
                     continue
 
             splunk_map[tid] = {
-                "total_rules"       : total_rules,
-                "enabled_rules"     : enabled_rules,
+                "total_rules": total_rules,
+                "enabled_rules": enabled_rules,
                 "enabled_percentage": enabled_pct,
             }
 
+        self._merge_aria_saved_searches(splunk_map)
         return splunk_map
+
+    def _merge_aria_saved_searches(self, splunk_map: dict):
+        """
+        Merge ARIA-created saved searches into coverage counts.
+        This closes the loop when the compliance lookup has not yet reflected
+        freshly deployed ARIA rules.
+        """
+        if not hasattr(self.client, "get_all_saved_searches"):
+            return
+
+        try:
+            searches = self.client.get_all_saved_searches() or []
+        except Exception as e:
+            print(
+                f"   Warning: failed to read saved searches for ARIA reconciliation: {e}"
+            )
+            return
+
+        aria_count = 0
+        for search in searches:
+            if not isinstance(search, dict):
+                continue
+
+            name = str(search.get("name", "")).strip()
+            if not name.upper().startswith("ARIA - "):
+                continue
+
+            tid = self._extract_tid_from_search_name(name)
+            if not tid:
+                continue
+
+            disabled_raw = str(search.get("disabled", "0")).strip().lower()
+            is_enabled = disabled_raw not in {"1", "true", "yes"}
+
+            existing = splunk_map.get(
+                tid,
+                {
+                    "total_rules": 0,
+                    "enabled_rules": 0,
+                    "enabled_percentage": 0.0,
+                },
+            )
+
+            total_rules = int(existing.get("total_rules", 0)) + 1
+            enabled_rules = int(existing.get("enabled_rules", 0)) + (
+                1 if is_enabled else 0
+            )
+            enabled_percentage = (
+                round((enabled_rules / total_rules) * 100, 1) if total_rules else 0.0
+            )
+
+            splunk_map[tid] = {
+                "total_rules": total_rules,
+                "enabled_rules": enabled_rules,
+                "enabled_percentage": enabled_percentage,
+            }
+            aria_count += 1
+
+        if aria_count:
+            print(
+                f"   ARIA reconciliation merged {aria_count} saved searches into coverage"
+            )
+
+    def _extract_tid_from_search_name(self, name: str) -> str | None:
+        match = re.search(r"\bT\d{4}(?:\.\d{3})?\b", name.upper())
+        if not match:
+            return None
+
+        tid = match.group(0)
+        # The MITRE loader currently tracks top-level techniques only.
+        if "." in tid:
+            tid = tid.split(".")[0]
+        return tid
 
     def _build_coverage_map(self, all_techniques: dict, splunk_coverage: dict) -> dict:
         """
@@ -120,12 +219,12 @@ class BlueAgent:
         coverage_map = {}
 
         for tid, technique in all_techniques.items():
-            splunk_data   = splunk_coverage.get(tid)
+            splunk_data = splunk_coverage.get(tid)
 
             if splunk_data:
-                total_rules   = splunk_data["total_rules"]
+                total_rules = splunk_data["total_rules"]
                 enabled_rules = splunk_data["enabled_rules"]
-                enabled_pct   = splunk_data["enabled_percentage"]
+                enabled_pct = splunk_data["enabled_percentage"]
             else:
                 total_rules = enabled_rules = 0
                 enabled_pct = 0.0
@@ -133,15 +232,15 @@ class BlueAgent:
             verdict = self._verdict(enabled_rules, total_rules)
 
             coverage_map[tid] = {
-                "technique_id"      : tid,
-                "technique_name"    : technique["name"],
-                "tactics"           : technique["tactics"],
-                "verdict"           : verdict,
-                "total_rules"       : total_rules,
-                "enabled_rules"     : enabled_rules,
+                "technique_id": tid,
+                "technique_name": technique["name"],
+                "tactics": technique["tactics"],
+                "verdict": verdict,
+                "total_rules": total_rules,
+                "enabled_rules": enabled_rules,
                 "enabled_percentage": enabled_pct,
-                "description"       : technique.get("description", ""),
-                "detection"         : technique.get("detection", ""), 
+                "description": technique.get("description", ""),
+                "detection": technique.get("detection", ""),
             }
 
         return coverage_map
@@ -160,16 +259,16 @@ class BlueAgent:
 
         covered = sum(1 for v in coverage_map.values() if v["verdict"] == self.COVERED)
         partial = sum(1 for v in coverage_map.values() if v["verdict"] == self.PARTIAL)
-        gaps    = sum(1 for v in coverage_map.values() if v["verdict"] == self.GAP)
-        
+        gaps = sum(1 for v in coverage_map.values() if v["verdict"] == self.GAP)
+
         score = ((covered + (partial * 0.5)) / total) * 100
 
         return {
-            "score"  : round(score, 1),
+            "score": round(score, 1),
             "covered": covered,
             "partial": partial,
-            "gaps"   : gaps,
-            "total"  : total,
+            "gaps": gaps,
+            "total": total,
         }
 
     def get_gaps(self, coverage_map: dict) -> list:

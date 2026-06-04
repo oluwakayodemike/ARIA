@@ -73,13 +73,22 @@ function ApprovalsPage() {
           queryKey: ["techniques"],
         })
 
-      optimisticUpdateTechnique(queryClient, techniqueId, (technique) => ({
-        ...technique,
-        pending_approval: false,
-        approved: true,
-        deployed: true,
-        rejected: false,
-      }))
+      optimisticUpdateTechnique(queryClient, techniqueId, (technique) => {
+        const total = (technique.total_rules ?? 0) + 1
+        const enabled = (technique.enabled_rules ?? 0) + 1
+
+        return {
+          ...technique,
+          pending_approval: false,
+          approved: true,
+          deployed: true,
+          rejected: false,
+          verdict: "COVERED",
+          total_rules: total,
+          enabled_rules: enabled,
+          enabled_percentage: total > 0 ? round1((enabled / total) * 100) : 0,
+        }
+      })
 
       queryClient.setQueryData<StateSummary | undefined>(
         queryKeys.state,
@@ -443,6 +452,10 @@ function optimisticUpdateTechnique(
 function formatConfidence(confidence: number | null) {
   if (confidence === null) return "N/A"
   return `${Math.round(confidence * 100)}%`
+}
+
+function round1(value: number) {
+  return Math.round(value * 10) / 10
 }
 
 function formatError(error: unknown, fallback: string) {
