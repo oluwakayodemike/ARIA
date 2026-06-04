@@ -132,8 +132,31 @@ class Orchestrator:
             if not technique:
                 return False
 
+            previous_verdict = technique.verdict
+
             technique.approved = True
             technique.deployed = True
+            technique.rejected = False
+
+            # Immediate in-memory reconciliation so UI reflects deployment in realtime.
+            technique.verdict = "COVERED"
+            technique.enabled_rules = max(1, technique.enabled_rules + 1)
+            technique.total_rules = max(
+                technique.total_rules + 1, technique.enabled_rules
+            )
+            technique.enabled_percentage = round(
+                (technique.enabled_rules / technique.total_rules) * 100, 1
+            )
+
+            if previous_verdict == "GAP":
+                self.state.gap_count = max(0, self.state.gap_count - 1)
+                self.state.covered_count += 1
+            elif previous_verdict == "PARTIAL":
+                self.state.partial_count = max(0, self.state.partial_count - 1)
+                self.state.covered_count += 1
+
+            self._recompute_coverage_score_locked()
+
             self.state.log(
                 "Orchestrator",
                 f"Rule deployed and approved for {technique_id} - {technique.technique_name}",
@@ -227,6 +250,47 @@ class Orchestrator:
                 for t in self.state.techniques.values()
                 if t.pending_approval
             ]
+
+    def bootstrap_state_from_splunk(self) -> bool:
+        """
+        Startup baseline load: run Blue Agent once and hydrate persisted
+        rule memory so UI has immediately useful state after server restart.
+        """
+        with self._lock:
+            if self.is_running:
+                return False
+            self.state = ARIAState()
+
+        try:
+            result = self.blue.run()
+            if "error" in result:
+                self.state.log(
+                    "Orchestrator",
+                    f"Startup baseline load failed: {result['error']}",
+                    level="error",
+                )
+                self.state.set_phase("error")
+                return False
+
+            self.state.update_from_blue(result["coverage_map"], result["score"])
+            hydrated = self._hydrate_rule_memory_from_kv()
+            self.state.set_phase("idle")
+            self.state.log(
+                "Orchestrator",
+                f"Startup baseline ready - {self.state.total_techniques} techniques, hydrated {hydrated} persisted rules",
+            )
+            self._notify()
+            return True
+
+        except Exception as e:
+            self.state.log(
+                "Orchestrator",
+                f"Startup baseline load failed: {e}",
+                level="error",
+            )
+            self.state.set_phase("error")
+            self._notify()
+            return False
 
     def _run_blue(self):
         self.state.set_phase("auditing")
@@ -342,6 +406,18 @@ class Orchestrator:
                 hydrated += 1
 
         return hydrated
+
+    def _recompute_coverage_score_locked(self):
+        """Recompute state.coverage_score. Caller must hold state lock."""
+        total = self.state.total_techniques
+        if total <= 0:
+            self.state.coverage_score = 0.0
+            return
+
+        score = (
+            (self.state.covered_count + (self.state.partial_count * 0.5)) / total
+        ) * 100
+        self.state.coverage_score = round(score, 1)
 
     def _notify(self):
         """

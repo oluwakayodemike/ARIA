@@ -62,6 +62,14 @@ async def lifespan(app: FastAPI):
         mitre_loader=mitre,
     )
 
+    bootstrapped = _orchestrator.bootstrap_state_from_splunk()
+    if bootstrapped:
+        print("ARIA startup baseline loaded from Splunk + KV memory.")
+    else:
+        print(
+            "ARIA startup baseline load skipped/failed; state will populate on first run."
+        )
+
     _broadcast_task = asyncio.create_task(_broadcast_loop())
     print("ARIA API started. Splunk connected, orchestrator ready.")
 

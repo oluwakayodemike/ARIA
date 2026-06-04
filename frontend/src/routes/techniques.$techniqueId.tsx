@@ -24,6 +24,7 @@ function TechniqueDetailPage() {
     queryKey: queryKeys.technique(techniqueId),
     queryFn: () => api.getTechnique(techniqueId),
     retry: false,
+    refetchInterval: 5000,
   })
 
   if (isLoading) {

@@ -246,15 +246,15 @@ class SplunkClient:
         except splunk_client.HTTPError as e:
             # invalid queries return a 400 with error details in the body
             if self._is_session_error(e) and self.connect():
-                service = self.service
-                if service is None:
+                reconnected = self.service
+                if reconnected is None:
                     return {
                         "valid": False,
                         "error": "Not connected to Splunk. call connect() first.",
                         "normalized": normalized,
                     }
                 try:
-                    service.parse(normalized, parse_only=True)
+                    reconnected.parse(normalized, parse_only=True)
                     return {"valid": True, "error": None, "normalized": normalized}
                 except splunk_client.HTTPError as retry_err:
                     return {
@@ -273,15 +273,15 @@ class SplunkClient:
         except Exception as e:
             # anything else = genuine connection or config problem
             if self._is_session_error(e) and self.connect():
-                service = self.service
-                if service is None:
+                reconnected = self.service
+                if reconnected is None:
                     return {
                         "valid": False,
                         "error": "Not connected to Splunk. call connect() first.",
                         "normalized": normalized,
                     }
                 try:
-                    service.parse(normalized, parse_only=True)
+                    reconnected.parse(normalized, parse_only=True)
                     return {"valid": True, "error": None, "normalized": normalized}
                 except splunk_client.HTTPError as retry_err:
                     return {
@@ -335,12 +335,12 @@ class SplunkClient:
             return _create_once(service)
         except Exception as e:
             if self._is_session_error(e) and self.connect():
-                service = self.service
-                if service is None:
+                reconnected = self.service
+                if reconnected is None:
                     print("failed to stage rule: not connected to Splunk")
                     return False
                 try:
-                    return _create_once(service)
+                    return _create_once(reconnected)
                 except Exception as retry_err:
                     print(f"failed to stage rule: {retry_err}")
                     return False
@@ -373,12 +373,12 @@ class SplunkClient:
             return _run_once(service)
         except Exception as e:
             if self._is_session_error(e) and self.connect():
-                service = self.service
-                if service is None:
+                reconnected = self.service
+                if reconnected is None:
                     print("[-] run_search failed: not connected to Splunk")
                     return []
                 try:
-                    return _run_once(service)
+                    return _run_once(reconnected)
                 except Exception as retry_err:
                     print(f"[-] run_search failed: {retry_err}")
                     return []

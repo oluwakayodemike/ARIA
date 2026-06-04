@@ -31,6 +31,7 @@ function TechniquesPage() {
     ),
     queryFn: () =>
       api.getTechniques(verdictFilter === "ALL" ? undefined : verdictFilter),
+    refetchInterval: 5000,
   })
 
   const filteredTechniques = useMemo(() => {
