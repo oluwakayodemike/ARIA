@@ -28,11 +28,11 @@ export function useAriaSocket({ onState }: UseAriaSocketOptions) {
   const [lastError, setLastError] = useState<string | null>(null)
 
   const reconnectTimerRef = useRef<number | null>(null)
+  const socketRef = useRef<WebSocket | null>(null)
   const retryRef = useRef(0)
 
   useEffect(() => {
     let isMounted = true
-    let socket: WebSocket | null = null
 
     const clearRetryTimer = () => {
       if (reconnectTimerRef.current !== null) {
@@ -41,40 +41,65 @@ export function useAriaSocket({ onState }: UseAriaSocketOptions) {
       }
     }
 
+    const closeActiveSocket = () => {
+      const active = socketRef.current
+      if (!active) return
+      active.onclose = null
+      active.close()
+      socketRef.current = null
+    }
+
     const scheduleReconnect = () => {
+      if (!isMounted) return
+      if (!window.navigator.onLine) {
+        setStatus("disconnected")
+        setLastError("Network offline. Waiting to reconnect...")
+        return
+      }
+
       clearRetryTimer()
 
       const attempt = retryRef.current + 1
       retryRef.current = attempt
 
       const backoffMs = Math.min(10_000, 1_000 * 2 ** (attempt - 1))
-      if (isMounted) {
-        setStatus("reconnecting")
-      }
+      const jitterMs = Math.floor(Math.random() * 250)
+      setStatus("reconnecting")
 
       reconnectTimerRef.current = window.setTimeout(() => {
         if (!isMounted) return
         connect()
-      }, backoffMs)
+      }, backoffMs + jitterMs)
     }
 
     const connect = () => {
-      clearRetryTimer()
+      if (!isMounted) return
+      if (!window.navigator.onLine) {
+        setStatus("disconnected")
+        setLastError("Network offline. Waiting to reconnect...")
+        return
+      }
 
-      if (isMounted && retryRef.current === 0) {
+      clearRetryTimer()
+      closeActiveSocket()
+
+      if (retryRef.current === 0) {
         setStatus("connecting")
       }
 
+      let socket: WebSocket
       try {
         socket = new WebSocket(getSocketUrl())
       } catch (error) {
-        if (isMounted) {
-          setLastError(error instanceof Error ? error.message : "WebSocket init failed")
-          setStatus("disconnected")
-        }
+        setLastError(
+          error instanceof Error ? error.message : "WebSocket init failed",
+        )
+        setStatus("disconnected")
         scheduleReconnect()
         return
       }
+
+      socketRef.current = socket
 
       socket.onopen = () => {
         if (!isMounted) return
@@ -101,20 +126,38 @@ export function useAriaSocket({ onState }: UseAriaSocketOptions) {
 
       socket.onclose = () => {
         if (!isMounted) return
+        socketRef.current = null
         setStatus("disconnected")
         scheduleReconnect()
       }
     }
+
+    const handleOnline = () => {
+      if (!isMounted) return
+      setLastError(null)
+      retryRef.current = 0
+      connect()
+    }
+
+    const handleOffline = () => {
+      if (!isMounted) return
+      clearRetryTimer()
+      closeActiveSocket()
+      setStatus("disconnected")
+      setLastError("Network offline. Waiting to reconnect...")
+    }
+
+    window.addEventListener("online", handleOnline)
+    window.addEventListener("offline", handleOffline)
 
     connect()
 
     return () => {
       isMounted = false
       clearRetryTimer()
-      if (socket) {
-        socket.onclose = null
-        socket.close()
-      }
+      window.removeEventListener("online", handleOnline)
+      window.removeEventListener("offline", handleOffline)
+      closeActiveSocket()
     }
   }, [onState])
 

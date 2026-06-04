@@ -80,7 +80,7 @@
     }
 
     .main-region {
-        @apply overflow-auto p-5 md:p-7;
+        @apply overflow-y-auto overflow-x-hidden p-5 md:p-7;
     }
 
     .glass-card {
@@ -109,6 +109,26 @@
 
     .panel-subtext {
         @apply text-sm text-ink-secondary;
+    }
+
+    .scroll-soft {
+        @apply overflow-auto;
+        scrollbar-width: thin;
+        scrollbar-color: rgb(143 134 114 / 65%) transparent;
+    }
+
+    .scroll-soft::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+
+    .scroll-soft::-webkit-scrollbar-thumb {
+        background: rgb(143 134 114 / 65%);
+        border-radius: 999px;
+    }
+
+    .scroll-soft::-webkit-scrollbar-track {
+        background: transparent;
     }
 
     .verdict-covered {

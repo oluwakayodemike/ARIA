@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ApiError, api } from "../api/client"
+import { api } from "../api/client"
+import { getErrorMessage } from "../lib/errors"
 import { queryKeys } from "../lib/queryKeys"
 import type {
   PendingResponse,
@@ -110,7 +111,7 @@ function ApprovalsPage() {
     },
     onError: (mutationError, techniqueId, context) => {
       restoreSnapshots(queryClient, techniqueId, context)
-      addToast("error", formatError(mutationError, "Approval failed"))
+      addToast("error", getErrorMessage(mutationError, "Approval failed"))
     },
     onSuccess: (result) => {
       addToast("success", `Approved and deployed ${result.technique_id}`)
@@ -193,7 +194,7 @@ function ApprovalsPage() {
     },
     onError: (mutationError, variables, context) => {
       restoreSnapshots(queryClient, variables.techniqueId, context)
-      addToast("error", formatError(mutationError, "Rejection failed"))
+      addToast("error", getErrorMessage(mutationError, "Rejection failed"))
     },
     onSuccess: (result, variables) => {
       const withReason = variables.reason
@@ -230,11 +231,11 @@ function ApprovalsPage() {
   }
 
   if (isError) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to load pending approvals."
-    return <p className="text-verdict-gap">{message}</p>
+    return (
+      <p className="text-verdict-gap">
+        {getErrorMessage(error, "Failed to load pending approvals")}
+      </p>
+    )
   }
 
   return (
@@ -270,109 +271,113 @@ function ApprovalsPage() {
           <p className="text-ink-secondary">No pending approvals right now.</p>
         </div>
       ) : (
-        <div className="grid gap-3 md:grid-cols-2">
-          {pending.map((technique) => {
-            const isBusy = activeAction?.techniqueId === technique.technique_id
-            const isRejecting = rejectingTechniqueId === technique.technique_id
+        <div className="scroll-soft max-h-[62vh] pr-1">
+          <div className="grid gap-3 md:grid-cols-2">
+            {pending.map((technique) => {
+              const isBusy =
+                activeAction?.techniqueId === technique.technique_id
+              const isRejecting =
+                rejectingTechniqueId === technique.technique_id
 
-            return (
-              <article
-                key={technique.technique_id}
-                className="glass-card border-l-2 border-l-accent-primary/70 p-4"
-              >
-                <p className="font-mono text-sm text-accent-glow">
-                  {technique.technique_id}
-                </p>
-                <p className="mt-1 text-ink-primary">
-                  {technique.technique_name}
-                </p>
-                <p className="mt-2 text-xs text-ink-secondary">
-                  Confidence: {formatConfidence(technique.rule_confidence)}
-                </p>
+              return (
+                <article
+                  key={technique.technique_id}
+                  className="glass-card border-l-2 border-l-accent-primary/70 p-4"
+                >
+                  <p className="font-mono text-sm text-accent-glow">
+                    {technique.technique_id}
+                  </p>
+                  <p className="mt-1 text-ink-primary">
+                    {technique.technique_name}
+                  </p>
+                  <p className="mt-2 text-xs text-ink-secondary">
+                    Confidence: {formatConfidence(technique.rule_confidence)}
+                  </p>
 
-                {isRejecting ? (
-                  <div className="mt-3 space-y-2">
-                    <label className="block text-xs text-ink-secondary">
-                      Rejection reason
-                      <textarea
-                        value={rejectReason}
-                        onChange={(event) =>
-                          setRejectReason(event.target.value)
-                        }
-                        rows={3}
-                        className="mt-1 w-full rounded-md border border-surface-600 bg-surface-800 px-2 py-1.5 text-sm text-ink-primary outline-none ring-accent-primary/40 focus:ring"
-                        placeholder="Optional: explain why this rule should be rejected"
+                  {isRejecting ? (
+                    <div className="mt-3 space-y-2">
+                      <label className="block text-xs text-ink-secondary">
+                        Rejection reason
+                        <textarea
+                          value={rejectReason}
+                          onChange={(event) =>
+                            setRejectReason(event.target.value)
+                          }
+                          rows={3}
+                          className="mt-1 w-full rounded-md border border-surface-600 bg-surface-800 px-2 py-1.5 text-sm text-ink-primary outline-none ring-accent-primary/40 focus:ring"
+                          placeholder="Optional: explain why this rule should be rejected"
+                          disabled={!canInteract || isBusy}
+                        />
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="rounded-md border border-verdict-gap/45 bg-verdict-gap/15 px-3 py-1.5 text-xs font-medium text-verdict-gap disabled:cursor-not-allowed disabled:opacity-50"
+                          disabled={!canInteract || isBusy}
+                          onClick={() => {
+                            setActiveAction({
+                              techniqueId: technique.technique_id,
+                              kind: "reject",
+                            })
+                            rejectMutation.mutate({
+                              techniqueId: technique.technique_id,
+                              reason: rejectReason.trim(),
+                            })
+                          }}
+                        >
+                          {isBusy && activeAction?.kind === "reject"
+                            ? "Rejecting..."
+                            : "Confirm Reject"}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-md border border-surface-600 px-3 py-1.5 text-xs text-ink-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                          disabled={!canInteract || isBusy}
+                          onClick={() => {
+                            setRejectingTechniqueId(null)
+                            setRejectReason("")
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-3 flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="rounded-md border border-verdict-covered/45 bg-verdict-covered/15 px-3 py-1.5 text-xs font-medium text-verdict-covered disabled:cursor-not-allowed disabled:opacity-50"
                         disabled={!canInteract || isBusy}
-                      />
-                    </label>
-                    <div className="flex items-center gap-2">
+                        onClick={() => {
+                          setActiveAction({
+                            techniqueId: technique.technique_id,
+                            kind: "approve",
+                          })
+                          approveMutation.mutate(technique.technique_id)
+                        }}
+                      >
+                        {isBusy && activeAction?.kind === "approve"
+                          ? "Approving..."
+                          : "Approve"}
+                      </button>
+
                       <button
                         type="button"
                         className="rounded-md border border-verdict-gap/45 bg-verdict-gap/15 px-3 py-1.5 text-xs font-medium text-verdict-gap disabled:cursor-not-allowed disabled:opacity-50"
                         disabled={!canInteract || isBusy}
                         onClick={() => {
-                          setActiveAction({
-                            techniqueId: technique.technique_id,
-                            kind: "reject",
-                          })
-                          rejectMutation.mutate({
-                            techniqueId: technique.technique_id,
-                            reason: rejectReason.trim(),
-                          })
-                        }}
-                      >
-                        {isBusy && activeAction?.kind === "reject"
-                          ? "Rejecting..."
-                          : "Confirm Reject"}
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-md border border-surface-600 px-3 py-1.5 text-xs text-ink-secondary disabled:cursor-not-allowed disabled:opacity-50"
-                        disabled={!canInteract || isBusy}
-                        onClick={() => {
-                          setRejectingTechniqueId(null)
+                          setRejectingTechniqueId(technique.technique_id)
                           setRejectReason("")
                         }}
                       >
-                        Cancel
+                        Reject
                       </button>
                     </div>
-                  </div>
-                ) : (
-                  <div className="mt-3 flex items-center gap-2">
-                    <button
-                      type="button"
-                      className="rounded-md border border-verdict-covered/45 bg-verdict-covered/15 px-3 py-1.5 text-xs font-medium text-verdict-covered disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={!canInteract || isBusy}
-                      onClick={() => {
-                        setActiveAction({
-                          techniqueId: technique.technique_id,
-                          kind: "approve",
-                        })
-                        approveMutation.mutate(technique.technique_id)
-                      }}
-                    >
-                      {isBusy && activeAction?.kind === "approve"
-                        ? "Approving..."
-                        : "Approve"}
-                    </button>
-
-                    <button
-                      type="button"
-                      className="rounded-md border border-verdict-gap/45 bg-verdict-gap/15 px-3 py-1.5 text-xs font-medium text-verdict-gap disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={!canInteract || isBusy}
-                      onClick={() => {
-                        setRejectingTechniqueId(technique.technique_id)
-                        setRejectReason("")
-                      }}
-                    >
-                      Reject
-                    </button>
-                  </div>
-                )}
-              </article>
-            )
-          })}
+                  )}
+                </article>
+              )
+            })}
+          </div>
         </div>
       )}
     </section>
@@ -456,16 +461,4 @@ function formatConfidence(confidence: number | null) {
 
 function round1(value: number) {
   return Math.round(value * 10) / 10
-}
-
-function formatError(error: unknown, fallback: string) {
-  if (error instanceof ApiError) {
-    return `${fallback}: ${error.detail ?? error.message} (HTTP ${error.status})`
-  }
-
-  if (error instanceof Error) {
-    return `${fallback}: ${error.message}`
-  }
-
-  return fallback
 }

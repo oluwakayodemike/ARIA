@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "../api/client"
 import { useAriaSocket } from "../hooks/useAriaSocket"
+import { getErrorMessage } from "../lib/errors"
 import { queryKeys } from "../lib/queryKeys"
 import type { StateSummary } from "../types/api"
 
@@ -121,7 +122,7 @@ function OverviewPage() {
             </label>
             {startRunMutation.isError ? (
               <p className="mt-2 text-sm text-verdict-gap">
-                {getErrorText(startRunMutation.error)}
+                {getErrorMessage(startRunMutation.error, "Failed to start run")}
               </p>
             ) : null}
             {socket.lastError ? (
@@ -151,31 +152,51 @@ function OverviewPage() {
           title="Phase"
           value={state?.phase ?? "—"}
           loading={isStateLoading}
-          error={isStateError ? getErrorText(stateError) : null}
+          error={
+            isStateError
+              ? getErrorMessage(stateError, "Failed to load state")
+              : null
+          }
         />
         <MetricCard
           title="Coverage Score"
           value={state ? `${state.coverage_score}%` : "—"}
           loading={isStateLoading}
-          error={isStateError ? getErrorText(stateError) : null}
+          error={
+            isStateError
+              ? getErrorMessage(stateError, "Failed to load state")
+              : null
+          }
         />
         <MetricCard
           title="Covered"
           value={state?.covered_count ?? "—"}
           loading={isStateLoading}
-          error={isStateError ? getErrorText(stateError) : null}
+          error={
+            isStateError
+              ? getErrorMessage(stateError, "Failed to load state")
+              : null
+          }
         />
         <MetricCard
           title="Partial"
           value={state?.partial_count ?? "—"}
           loading={isStateLoading}
-          error={isStateError ? getErrorText(stateError) : null}
+          error={
+            isStateError
+              ? getErrorMessage(stateError, "Failed to load state")
+              : null
+          }
         />
         <MetricCard
           title="Gaps"
           value={state?.gap_count ?? "—"}
           loading={isStateLoading}
-          error={isStateError ? getErrorText(stateError) : null}
+          error={
+            isStateError
+              ? getErrorMessage(stateError, "Failed to load state")
+              : null
+          }
         />
       </div>
 
@@ -190,11 +211,13 @@ function OverviewPage() {
             {isStateLoading ? (
               <p className="text-ink-secondary">Loading state…</p>
             ) : isStateError ? (
-              <p className="text-verdict-gap">{getErrorText(stateError)}</p>
+              <p className="text-verdict-gap">
+                {getErrorMessage(stateError, "Failed to load state")}
+              </p>
             ) : !logEntries.length ? (
               <p className="text-ink-secondary">No log entries yet.</p>
             ) : (
-              <ul className="space-y-2 text-sm">
+              <ul className="scroll-soft max-h-[46vh] space-y-2 pr-1 text-sm">
                 {logEntries.map((entry) => (
                   <li
                     key={`${entry.timestamp}-${entry.agent}-${entry.message}`}
@@ -238,7 +261,7 @@ function OverviewPage() {
               <dt className="text-ink-muted">Health</dt>
               <dd>
                 {isHealthError
-                  ? getErrorText(healthError)
+                  ? getErrorMessage(healthError, "Health check failed")
                   : health?.status === "ok"
                     ? "OK"
                     : "—"}
@@ -283,9 +306,4 @@ function MetricCard({
       )}
     </article>
   )
-}
-
-function getErrorText(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return "Request failed."
 }

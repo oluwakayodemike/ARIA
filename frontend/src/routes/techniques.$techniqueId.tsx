@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { ApiError, api } from "../api/client"
+import { getErrorMessage } from "../lib/errors"
 import { queryKeys } from "../lib/queryKeys"
 
 export const Route = createFileRoute("/techniques/$techniqueId")({
@@ -40,11 +41,11 @@ function TechniqueDetailPage() {
       )
     }
 
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to load technique details."
-    return <p className="text-verdict-gap">{message}</p>
+    return (
+      <p className="text-verdict-gap">
+        {getErrorMessage(error, "Failed to load technique details")}
+      </p>
+    )
   }
 
   if (!data) {
@@ -131,7 +132,7 @@ function TechniqueDetailPage() {
         )}
 
         {data.generated_rule ? (
-          <pre className="overflow-auto whitespace-pre-wrap rounded-lg border border-surface-600/70 bg-surface-900/80 p-3 text-xs text-ink-primary">
+          <pre className="scroll-soft max-h-[36vh] whitespace-pre-wrap rounded-lg border border-surface-600/70 bg-surface-900/80 p-3 text-xs text-ink-primary">
             {data.generated_rule}
           </pre>
         ) : (

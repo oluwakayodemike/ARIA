@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { api } from "../api/client"
+import { getErrorMessage } from "../lib/errors"
 import { queryKeys } from "../lib/queryKeys"
 
 export const Route = createFileRoute("/techniques")({
@@ -93,9 +94,7 @@ function TechniquesPage() {
         <p className="text-ink-secondary">Loading techniques…</p>
       ) : isError ? (
         <p className="text-verdict-gap">
-          {error instanceof Error
-            ? error.message
-            : "Failed to load techniques."}
+          {getErrorMessage(error, "Failed to load techniques")}
         </p>
       ) : !(data?.techniques?.length ?? 0) ? (
         <div className="glass-card p-4">
@@ -110,7 +109,7 @@ function TechniquesPage() {
           </p>
         </div>
       ) : (
-        <div className="glass-card overflow-auto">
+        <div className="glass-card scroll-soft max-h-[52vh]">
           <table className="min-w-full text-left text-sm">
             <thead className="bg-surface-800/80 text-ink-secondary">
               <tr>
@@ -135,6 +134,7 @@ function TechniquesPage() {
                   }
                   onKeyDown={(event) => {
                     if (event.key !== "Enter" && event.key !== " ") return
+                    event.preventDefault()
 
                     navigate({
                       to: "/techniques/$techniqueId",
@@ -142,6 +142,7 @@ function TechniquesPage() {
                     })
                   }}
                   tabIndex={0}
+                  role="button"
                 >
                   <td className="px-4 py-3 font-mono text-accent-glow">
                     {technique.technique_id}
