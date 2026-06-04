@@ -64,6 +64,25 @@
             ),
             linear-gradient(180deg, #12110d 0%, #0e0d09 100%);
     }
+
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: rgb(143 134 114 / 65%) transparent;
+    }
+
+    *::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+
+    *::-webkit-scrollbar-thumb {
+        background: rgb(143 134 114 / 65%);
+        border-radius: 999px;
+    }
+
+    *::-webkit-scrollbar-track {
+        background: transparent;
+    }
 }
 
 @layer components {
