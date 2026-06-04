@@ -232,6 +232,8 @@ class Orchestrator:
         self._notify()
 
     def _run_gap(self, gap_limit: int):
+        self._preflight_gap_phase()
+
         self.state.log(
             "Orchestrator",
             f"Starting Gap Agent - generating SPL rules for up to {gap_limit} gaps...",
@@ -252,6 +254,28 @@ class Orchestrator:
             f"Gap Agent complete - {generated} rules staged for approval",
         )
         self._notify()
+
+    def _preflight_gap_phase(self):
+        """
+        Ensure Splunk session is valid before invoking expensive AI generation.
+        This prevents burning model calls when Splunk auth/session has expired.
+        """
+        validation = self.splunk.validate_spl("search index=* | head 1")
+        if validation.get("valid"):
+            return
+
+        error = str(validation.get("error") or "Unknown Splunk validation error")
+        if hasattr(
+            self.splunk, "is_session_error_message"
+        ) and self.splunk.is_session_error_message(error):
+            raise RuntimeError(
+                "Splunk authentication/session failed before Gap Agent phase. "
+                "Please reconnect Splunk and retry."
+            )
+
+        raise RuntimeError(
+            f"Splunk preflight check failed before Gap Agent phase: {error}"
+        )
 
     def _notify(self):
         """

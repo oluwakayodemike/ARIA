@@ -268,7 +268,9 @@ function ApprovalsPage() {
 
       {!pending.length ? (
         <div className="glass-card p-4">
-          <p className="text-ink-secondary">No pending approvals right now.</p>
+          <p className="text-base text-ink-secondary">
+            No pending approvals right now.
+          </p>
         </div>
       ) : (
         <div className="scroll-soft max-h-[62vh] pr-1">
