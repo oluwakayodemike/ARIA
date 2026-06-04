@@ -139,6 +139,24 @@ class Orchestrator:
                 f"Rule deployed and approved for {technique_id} - {technique.technique_name}",
             )
 
+            persisted = self.splunk.save_rule_memory(
+                technique_id=technique.technique_id,
+                technique_name=technique.technique_name,
+                generated_rule=technique.generated_rule,
+                rule_explanation=technique.rule_explanation,
+                rule_confidence=technique.rule_confidence,
+                pending_approval=technique.pending_approval,
+                approved=technique.approved,
+                rejected=technique.rejected,
+                deployed=technique.deployed,
+            )
+            if not persisted:
+                self.state.log(
+                    "Orchestrator",
+                    f"Warning: failed to persist rule memory for {technique_id}",
+                    level="warning",
+                )
+
         self._notify()
         return True
 
@@ -164,6 +182,24 @@ class Orchestrator:
             if reason:
                 message += f" - reason: {reason}"
             self.state.log("Orchestrator", message)
+
+            persisted = self.splunk.save_rule_memory(
+                technique_id=technique.technique_id,
+                technique_name=technique.technique_name,
+                generated_rule=technique.generated_rule,
+                rule_explanation=technique.rule_explanation,
+                rule_confidence=technique.rule_confidence,
+                pending_approval=technique.pending_approval,
+                approved=technique.approved,
+                rejected=technique.rejected,
+                deployed=technique.deployed,
+            )
+            if not persisted:
+                self.state.log(
+                    "Orchestrator",
+                    f"Warning: failed to persist rule memory for {technique_id}",
+                    level="warning",
+                )
 
         self._notify()
         return True
@@ -205,10 +241,12 @@ class Orchestrator:
             raise RuntimeError(f"Blue Agent failed: {result['error']}")
 
         self.state.update_from_blue(result["coverage_map"], result["score"])
+        hydrated = self._hydrate_rule_memory_from_kv()
         self.state.log(
             "Orchestrator",
             f"Blue Agent complete - {self.state.gap_count} gaps detected, "
-            f"score {self.state.coverage_score}%",
+            f"score {self.state.coverage_score}%"
+            + (f", hydrated {hydrated} persisted rules" if hydrated else ""),
         )
         self._notify()
 
@@ -276,6 +314,34 @@ class Orchestrator:
         raise RuntimeError(
             f"Splunk preflight check failed before Gap Agent phase: {error}"
         )
+
+    def _hydrate_rule_memory_from_kv(self) -> int:
+        """
+        Hydrate persisted rule lifecycle fields from Splunk KV store into
+        the in-memory ARIA state after Blue coverage is rebuilt.
+        Returns number of techniques hydrated.
+        """
+        records = self.splunk.get_rule_memory_map()
+        if not isinstance(records, dict) or not records:
+            return 0
+
+        hydrated = 0
+        with self.state.locked():
+            for tid, row in records.items():
+                technique = self.state.techniques.get(tid)
+                if not technique:
+                    continue
+
+                technique.generated_rule = row.get("generated_rule")
+                technique.rule_explanation = row.get("rule_explanation")
+                technique.rule_confidence = row.get("rule_confidence")
+                technique.pending_approval = bool(row.get("pending_approval", False))
+                technique.approved = bool(row.get("approved", False))
+                technique.rejected = bool(row.get("rejected", False))
+                technique.deployed = bool(row.get("deployed", False))
+                hydrated += 1
+
+        return hydrated
 
     def _notify(self):
         """

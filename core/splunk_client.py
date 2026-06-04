@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import splunklib.client as client
 
 from config import (
@@ -10,6 +12,8 @@ from config import (
 
 
 class SplunkClient:
+    ARIA_KV_COLLECTION = "aria_rule_memory"
+
     def __init__(self):
         self.service = None
 
@@ -54,6 +58,93 @@ class SplunkClient:
         """Public helper for callers (e.g., agents) to classify auth/session errors."""
         return self._is_session_error(message)
 
+    def _get_or_create_aria_kv_collection(self):
+        """Return ARIA KV collection, creating it if missing."""
+        if not self.ensure_connected():
+            raise Exception("not connected to Splunk. call connect() first.")
+
+        service = self.service
+        if service is None:
+            raise Exception("not connected to Splunk. call connect() first.")
+
+        kv = service.kvstore
+
+        try:
+            return kv[self.ARIA_KV_COLLECTION]
+        except KeyError:
+            kv.create(self.ARIA_KV_COLLECTION)
+            return kv[self.ARIA_KV_COLLECTION]
+
+    def save_rule_memory(
+        self,
+        technique_id: str,
+        technique_name: str,
+        generated_rule: str | None,
+        rule_explanation: str | None,
+        rule_confidence: float | None,
+        pending_approval: bool,
+        approved: bool,
+        rejected: bool,
+        deployed: bool,
+    ) -> bool:
+        """
+        Persist ARIA rule lifecycle metadata in Splunk KV store.
+        Uses _key=technique_id for idempotent upsert semantics.
+        """
+        try:
+            collection = self._get_or_create_aria_kv_collection()
+            record = {
+                "_key": technique_id.upper(),
+                "technique_id": technique_id.upper(),
+                "technique_name": technique_name,
+                "generated_rule": generated_rule,
+                "rule_explanation": rule_explanation,
+                "rule_confidence": rule_confidence,
+                "pending_approval": bool(pending_approval),
+                "approved": bool(approved),
+                "rejected": bool(rejected),
+                "deployed": bool(deployed),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            collection.data.batch_save(record)
+            return True
+        except Exception as e:
+            print(f"failed to persist rule memory in KV store: {e}")
+            return False
+
+    def get_rule_memory_map(self) -> dict[str, dict]:
+        """
+        Load ARIA rule metadata from KV store, keyed by technique_id.
+        Returns empty dict if collection doesn't exist or request fails.
+        """
+        try:
+            if not self.ensure_connected():
+                return {}
+
+            service = self.service
+            if service is None:
+                return {}
+
+            kv = service.kvstore
+            try:
+                collection = kv[self.ARIA_KV_COLLECTION]
+            except KeyError:
+                return {}
+
+            rows = collection.data.query() or []
+            out = {}
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                tid = str(row.get("technique_id", "")).strip().upper()
+                if not tid:
+                    continue
+                out[tid] = row
+            return out
+        except Exception as e:
+            print(f"failed to load rule memory from KV store: {e}")
+            return {}
+
     def get_all_saved_searches(self):
         """
         Blue Agent's primary data source for generating new rules is existing saved searches from Splunk.
@@ -62,9 +153,13 @@ class SplunkClient:
         if not self.ensure_connected():
             raise Exception("not connected to Splunk. call connect() first.")
 
+        service = self.service
+        if service is None:
+            raise Exception("not connected to Splunk. call connect() first.")
+
         searches = []
         try:
-            for search in self.service.saved_searches:
+            for search in service.saved_searches:
                 content = search.content
                 searches.append(
                     {
@@ -84,8 +179,12 @@ class SplunkClient:
             return searches
         except Exception as e:
             if self._is_session_error(e) and self.connect():
+                service = self.service
+                if service is None:
+                    raise
+
                 searches = []
-                for search in self.service.saved_searches:
+                for search in service.saved_searches:
                     content = search.content
                     searches.append(
                         {
@@ -132,15 +231,30 @@ class SplunkClient:
                 "normalized": normalized,
             }
 
+        service = self.service
+        if service is None:
+            return {
+                "valid": False,
+                "error": "Not connected to Splunk. call connect() first.",
+                "normalized": normalized,
+            }
+
         try:
-            self.service.parse(normalized, parse_only=True)
+            service.parse(normalized, parse_only=True)
             return {"valid": True, "error": None, "normalized": normalized}
 
         except splunk_client.HTTPError as e:
             # invalid queries return a 400 with error details in the body
             if self._is_session_error(e) and self.connect():
+                service = self.service
+                if service is None:
+                    return {
+                        "valid": False,
+                        "error": "Not connected to Splunk. call connect() first.",
+                        "normalized": normalized,
+                    }
                 try:
-                    self.service.parse(normalized, parse_only=True)
+                    service.parse(normalized, parse_only=True)
                     return {"valid": True, "error": None, "normalized": normalized}
                 except splunk_client.HTTPError as retry_err:
                     return {
@@ -159,8 +273,15 @@ class SplunkClient:
         except Exception as e:
             # anything else = genuine connection or config problem
             if self._is_session_error(e) and self.connect():
+                service = self.service
+                if service is None:
+                    return {
+                        "valid": False,
+                        "error": "Not connected to Splunk. call connect() first.",
+                        "normalized": normalized,
+                    }
                 try:
-                    self.service.parse(normalized, parse_only=True)
+                    service.parse(normalized, parse_only=True)
                     return {"valid": True, "error": None, "normalized": normalized}
                 except splunk_client.HTTPError as retry_err:
                     return {
@@ -190,14 +311,19 @@ class SplunkClient:
             print("failed to stage rule: not connected to Splunk")
             return False
 
-        def _create_once() -> bool:
+        service = self.service
+        if service is None:
+            print("failed to stage rule: not connected to Splunk")
+            return False
+
+        def _create_once(active_service) -> bool:
             kwargs: dict[str, object] = {
                 "is_scheduled": False,  # human can enable scheduling post-review
             }
             if description:
                 kwargs["description"] = description
 
-            self.service.saved_searches.create(
+            active_service.saved_searches.create(
                 name,
                 query,
                 **kwargs,
@@ -206,11 +332,15 @@ class SplunkClient:
             return True
 
         try:
-            return _create_once()
+            return _create_once(service)
         except Exception as e:
             if self._is_session_error(e) and self.connect():
+                service = self.service
+                if service is None:
+                    print("failed to stage rule: not connected to Splunk")
+                    return False
                 try:
-                    return _create_once()
+                    return _create_once(service)
                 except Exception as retry_err:
                     print(f"failed to stage rule: {retry_err}")
                     return False
@@ -226,8 +356,13 @@ class SplunkClient:
             print("[-] run_search failed: not connected to Splunk")
             return []
 
-        def _run_once():
-            response = self.service.jobs.oneshot(
+        service = self.service
+        if service is None:
+            print("[-] run_search failed: not connected to Splunk")
+            return []
+
+        def _run_once(active_service):
+            response = active_service.jobs.oneshot(
                 spl_query, count=max_results, output_mode="json"
             )
             data = json.loads(response.read().decode("utf-8"))
@@ -235,11 +370,15 @@ class SplunkClient:
 
         # we must explicitly request JSON, otherwise Splunk defaults to XML [and the SDK doesn't parse it right]
         try:
-            return _run_once()
+            return _run_once(service)
         except Exception as e:
             if self._is_session_error(e) and self.connect():
+                service = self.service
+                if service is None:
+                    print("[-] run_search failed: not connected to Splunk")
+                    return []
                 try:
-                    return _run_once()
+                    return _run_once(service)
                 except Exception as retry_err:
                     print(f"[-] run_search failed: {retry_err}")
                     return []
