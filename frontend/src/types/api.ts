@@ -27,6 +27,15 @@ export interface StateSummary {
   pending_approvals: number
   error_count: number
   reasoning_log: ReasoningLogEntry[]
+
+  coverage_before: number
+  coverage_after: number
+  gaps_identified: number
+  rules_generated: number
+  rules_approved: number
+  rules_deployed: number
+  avg_generation_time: number
+  analyst_minutes_saved_estimate: number
 }
 
 export interface HealthResponse {

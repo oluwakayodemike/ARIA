@@ -156,6 +156,9 @@ class Orchestrator:
                 self.state.covered_count += 1
 
             self._recompute_coverage_score_locked()
+            self.state.coverage_after = self.state.coverage_score
+            self.state.rules_approved += 1
+            self.state.rules_deployed += 1
 
             self.state.log(
                 "Orchestrator",
@@ -311,6 +314,15 @@ class Orchestrator:
             raise RuntimeError(f"Blue Agent failed: {result['error']}")
 
         self.state.update_from_blue(result["coverage_map"], result["score"])
+        with self.state.locked():
+            self.state.coverage_before = self.state.coverage_score
+            self.state.coverage_after = self.state.coverage_score
+            self.state.gaps_identified = self.state.gap_count
+            self.state.rules_generated = 0
+            self.state.rules_approved = 0
+            self.state.rules_deployed = 0
+            self.state.generation_durations_sec = []
+
         hydrated = self._hydrate_rule_memory_from_kv()
         self.state.log(
             "Orchestrator",
@@ -348,14 +360,24 @@ class Orchestrator:
         )
         self._notify()
 
-        self.gap_agent.run(self.state, limit=gap_limit)
-
         with self.state.locked():
-            generated = sum(
+            generated_before = sum(
                 1
                 for t in self.state.techniques.values()
                 if t.generated_rule is not None
             )
+
+        self.gap_agent.run(self.state, limit=gap_limit)
+
+        with self.state.locked():
+            generated_after = sum(
+                1
+                for t in self.state.techniques.values()
+                if t.generated_rule is not None
+            )
+            generated = max(0, generated_after - generated_before)
+            self.state.rules_generated = generated
+
         self.state.set_phase("awaiting_approval")
         self.state.log(
             "Orchestrator",

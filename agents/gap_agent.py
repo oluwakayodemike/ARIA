@@ -128,6 +128,8 @@ class GapAgent:
 
     def _process_technique(self, technique: TechniqueState, state: ARIAState):
         """full lifecycle: generate → validate → retry with error context → stage."""
+        started_at = time.perf_counter()
+
         state.log(
             "GapAgent",
             f"Generating rule for {technique.technique_id} - {technique.technique_name}",
@@ -171,10 +173,14 @@ class GapAgent:
                     technique.rule_provider = provider
                     technique.rule_provider_trace = payload.get("provider_trace", [])
                     technique.pending_approval = True
+                elapsed_sec = round(time.perf_counter() - started_at, 2)
+                with state.locked():
+                    state.generation_durations_sec.append(elapsed_sec)
+
                 state.log(
                     "GapAgent",
                     f"rule validated for {technique.technique_id} "
-                    f"(attempt {attempt}, provider {provider}, confidence {confidence if confidence is not None else 'n/a'})",
+                    f"(attempt {attempt}, provider {provider}, confidence {confidence if confidence is not None else 'n/a'}, {elapsed_sec}s)",
                 )
                 return
 
@@ -204,10 +210,14 @@ class GapAgent:
                             "provider_trace", []
                         )
                         technique.pending_approval = True
+                    elapsed_sec = round(time.perf_counter() - started_at, 2)
+                    with state.locked():
+                        state.generation_durations_sec.append(elapsed_sec)
+
                     state.log(
                         "GapAgent",
                         f"rule validated for {technique.technique_id} "
-                        f"after session reconnect (attempt {attempt}, provider {provider}, confidence {confidence if confidence is not None else 'n/a'})",
+                        f"after session reconnect (attempt {attempt}, provider {provider}, confidence {confidence if confidence is not None else 'n/a'}, {elapsed_sec}s)",
                     )
                     return
 

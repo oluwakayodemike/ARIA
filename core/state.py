@@ -95,6 +95,15 @@ class ARIAState:
 
     reasoning_log: list = field(default_factory=list)
 
+    # Quantified impact metrics for demo/reporting.
+    coverage_before: float = 0.0
+    coverage_after: float = 0.0
+    gaps_identified: int = 0
+    rules_generated: int = 0
+    rules_approved: int = 0
+    rules_deployed: int = 0
+    generation_durations_sec: list[float] = field(default_factory=list)
+
     def __post_init__(self):
         # RLock allows nested acquisition across helper methods.
         self._state_lock = threading.RLock()
@@ -177,6 +186,18 @@ class ARIAState:
     def to_summary(self) -> dict:
         """Lightweight snapshot the API broadcasts to the frontend."""
         with self._state_lock:
+            avg_generation_time = (
+                round(
+                    sum(self.generation_durations_sec)
+                    / len(self.generation_durations_sec),
+                    2,
+                )
+                if self.generation_durations_sec
+                else 0.0
+            )
+
+            analyst_minutes_saved = self.rules_generated * 15
+
             return {
                 "run_id": self.run_id,
                 "phase": self.phase,
@@ -188,6 +209,14 @@ class ARIAState:
                 "pending_approvals": len(self.get_pending_approvals()),
                 "error_count": len(self.errors),
                 "reasoning_log": [e.copy() for e in self.reasoning_log[-20:]],
+                "coverage_before": self.coverage_before,
+                "coverage_after": self.coverage_after,
+                "gaps_identified": self.gaps_identified,
+                "rules_generated": self.rules_generated,
+                "rules_approved": self.rules_approved,
+                "rules_deployed": self.rules_deployed,
+                "avg_generation_time": avg_generation_time,
+                "analyst_minutes_saved_estimate": analyst_minutes_saved,
             }
 
     def to_dict(self) -> dict:
@@ -205,5 +234,13 @@ class ARIAState:
                 "gap_count": self.gap_count,
                 "errors": [e.copy() for e in self.errors],
                 "reasoning_log": [e.copy() for e in self.reasoning_log],
+                "coverage_before": self.coverage_before,
+                "coverage_after": self.coverage_after,
+                "gaps_identified": self.gaps_identified,
+                "rules_generated": self.rules_generated,
+                "rules_approved": self.rules_approved,
+                "rules_deployed": self.rules_deployed,
+                "generation_durations_sec": self.generation_durations_sec.copy(),
+                "analyst_minutes_saved_estimate": self.rules_generated * 15,
                 "techniques": {tid: t.to_dict() for tid, t in self.techniques.items()},
             }

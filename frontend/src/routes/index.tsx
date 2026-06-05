@@ -65,6 +65,13 @@ function OverviewPage() {
 
   const logEntries = state?.reasoning_log?.slice(-14).reverse() ?? []
 
+  const coverageLift = state
+    ? Math.max(
+        0,
+        Number((state.coverage_after - state.coverage_before).toFixed(1)),
+      )
+    : 0
+
   const canStartRun = !startRunMutation.isPending && !health?.is_running
   const hasStateData =
     !!state &&
@@ -279,7 +286,84 @@ function OverviewPage() {
           ) : null}
         </aside>
       </div>
+
+      <section className="glass-card p-4 md:p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="muted-label">Pipeline Analytics</p>
+            <h2 className="mt-1 text-lg font-semibold text-accent-glow">
+              Operational Impact & Coverage Telemetry
+            </h2>
+          </div>
+          <p className="text-xs text-ink-muted">Active execution cycle</p>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <ImpactStat
+            label="Telemetry Baseline"
+            value={state ? `${state.coverage_before}%` : "—"}
+          />
+          <ImpactStat
+            label="Post-Run Target"
+            value={state ? `${state.coverage_after}%` : "—"}
+          />
+          <ImpactStat
+            label="Net Coverage Delta"
+            value={state ? `+${coverageLift}%` : "—"}
+          />
+          <ImpactStat
+            label="Coverage Gaps Isolated"
+            value={state?.gaps_identified ?? "—"}
+          />
+          <ImpactStat
+            label="Detections Synthesized"
+            value={state?.rules_generated ?? "—"}
+          />
+          <ImpactStat
+            label="Detections Approved"
+            value={state?.rules_approved ?? "—"}
+          />
+          <ImpactStat
+            label="Live Deployments"
+            value={state?.rules_deployed ?? "—"}
+          />
+          <ImpactStat
+            label="Avg Pipeline Latency"
+            value={state ? `${state.avg_generation_time.toFixed(2)}s` : "—"}
+          />
+        </div>
+
+        <div className="mt-3 rounded-lg border border-surface-600/70 bg-surface-800/70 p-3">
+          <p className="text-xs uppercase tracking-[0.12em] text-ink-muted">
+            Engineering Cycles Reclaimed
+          </p>
+          <p className="mt-1 text-2xl font-semibold text-accent-glow">
+            ~{state?.analyst_minutes_saved_estimate ?? "—"} minutes
+          </p>
+          <p className="mt-1 text-xs text-ink-muted">
+            Calculated using a 15-minute standard industry benchmark for manual
+            detection design, testing, and schema validation.
+          </p>
+        </div>
+      </section>
     </section>
+  )
+}
+
+function ImpactStat({
+  label,
+  value,
+}: {
+  label: string
+  value: string | number
+}) {
+  return (
+    <article className="rounded-lg border border-surface-600/70 bg-surface-800/70 p-3">
+      <p className="text-xs uppercase tracking-[0.12em] text-ink-muted">
+        {label}
+      </p>
+      <p className="mt-1 text-xl font-semibold text-accent-glow">{value}</p>
+    </article>
   )
 }
 
