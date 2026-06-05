@@ -168,6 +168,8 @@ class Orchestrator:
                 generated_rule=technique.generated_rule,
                 rule_explanation=technique.rule_explanation,
                 rule_confidence=technique.rule_confidence,
+                rule_provider=technique.rule_provider,
+                rule_provider_trace=technique.rule_provider_trace,
                 pending_approval=technique.pending_approval,
                 approved=technique.approved,
                 rejected=technique.rejected,
@@ -200,6 +202,8 @@ class Orchestrator:
             technique.generated_rule = None
             technique.rule_explanation = None
             technique.rule_confidence = None
+            technique.rule_provider = None
+            technique.rule_provider_trace = []
 
             message = f"Rule rejected for {technique_id}"
             if reason:
@@ -212,6 +216,8 @@ class Orchestrator:
                 generated_rule=technique.generated_rule,
                 rule_explanation=technique.rule_explanation,
                 rule_confidence=technique.rule_confidence,
+                rule_provider=technique.rule_provider,
+                rule_provider_trace=technique.rule_provider_trace,
                 pending_approval=technique.pending_approval,
                 approved=technique.approved,
                 rejected=technique.rejected,
@@ -399,6 +405,16 @@ class Orchestrator:
                 technique.generated_rule = row.get("generated_rule")
                 technique.rule_explanation = row.get("rule_explanation")
                 technique.rule_confidence = row.get("rule_confidence")
+                technique.rule_provider = row.get("rule_provider")
+
+                raw_trace = row.get("rule_provider_trace", [])
+                if isinstance(raw_trace, list):
+                    technique.rule_provider_trace = [str(item) for item in raw_trace]
+                elif isinstance(raw_trace, str) and raw_trace.strip():
+                    technique.rule_provider_trace = [raw_trace.strip()]
+                else:
+                    technique.rule_provider_trace = []
+
                 technique.pending_approval = bool(row.get("pending_approval", False))
                 technique.approved = bool(row.get("approved", False))
                 technique.rejected = bool(row.get("rejected", False))

@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import unittest
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 from pydantic import ValidationError
 
@@ -210,6 +210,8 @@ class TestGapAgentRun(unittest.TestCase):
         )
         self.assertEqual(t.rule_explanation, "Detects phishing via proxy logs.")
         self.assertEqual(t.rule_confidence, 0.9)
+        self.assertEqual(t.rule_provider, "gemini")
+        self.assertEqual(t.rule_provider_trace, ["gemini_generate_content"])
         self.assertTrue(t.pending_approval)
 
     def test_failed_technique_does_not_block_next_technique(self):

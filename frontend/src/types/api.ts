@@ -49,6 +49,8 @@ export interface Technique {
   generated_rule: string | null
   rule_explanation: string | null
   rule_confidence: number | null
+  rule_provider: string | null
+  rule_provider_trace: string[]
   pending_approval: boolean
   approved: boolean
   rejected: boolean

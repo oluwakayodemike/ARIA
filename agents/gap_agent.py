@@ -168,6 +168,8 @@ class GapAgent:
                     technique.generated_rule = validation["normalized"]
                     technique.rule_explanation = explanation
                     technique.rule_confidence = confidence
+                    technique.rule_provider = provider
+                    technique.rule_provider_trace = payload.get("provider_trace", [])
                     technique.pending_approval = True
                 state.log(
                     "GapAgent",
@@ -197,6 +199,10 @@ class GapAgent:
                         technique.generated_rule = retry_validation["normalized"]
                         technique.rule_explanation = explanation
                         technique.rule_confidence = confidence
+                        technique.rule_provider = provider
+                        technique.rule_provider_trace = payload.get(
+                            "provider_trace", []
+                        )
                         technique.pending_approval = True
                     state.log(
                         "GapAgent",
