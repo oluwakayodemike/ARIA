@@ -4,12 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "../api/client"
 import { getErrorMessage } from "../lib/errors"
 import { queryKeys } from "../lib/queryKeys"
-import type {
-  PendingResponse,
-  StateSummary,
-  Technique,
-  TechniquesResponse,
-} from "../types/api"
+import type { Technique } from "../types/api"
 
 export const Route = createFileRoute("/approvals")({
   component: ApprovalsPage,
@@ -17,17 +12,14 @@ export const Route = createFileRoute("/approvals")({
 
 type ActionState = { techniqueId: string; kind: "approve" | "reject" } | null
 
+type ToastKind = "success" | "error" | "info" | "loading"
+
 type Toast = {
   id: number
-  kind: "success" | "error"
-  message: string
-}
-
-type SnapshotContext = {
-  pendingSnapshot?: PendingResponse
-  stateSnapshot?: StateSummary
-  techniqueSnapshot?: Technique
-  techniquesSnapshots?: [readonly unknown[], TechniquesResponse | undefined][]
+  kind: ToastKind
+  title: string
+  message?: string
+  sticky?: boolean
 }
 
 const EMPTY_PENDING: Technique[] = []
@@ -54,14 +46,25 @@ function ApprovalsPage() {
     refetchInterval: 5000,
   })
 
-  const addToast = useCallback((kind: Toast["kind"], message: string) => {
-    const id = Date.now() + Math.floor(Math.random() * 1000)
-    setToasts((current) => [...current, { id, kind, message }])
-
-    window.setTimeout(() => {
-      setToasts((current) => current.filter((toast) => toast.id !== id))
-    }, 4200)
+  const dismissToast = useCallback((id: number) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id))
   }, [])
+
+  const pushToast = useCallback(
+    ({ kind, title, message, sticky = false }: Omit<Toast, "id">) => {
+      const id = Date.now() + Math.floor(Math.random() * 1000)
+      setToasts((current) => [...current, { id, kind, title, message, sticky }])
+
+      if (!sticky) {
+        window.setTimeout(() => {
+          dismissToast(id)
+        }, 4500)
+      }
+
+      return id
+    },
+    [dismissToast],
+  )
 
   const approveMutation = useMutation({
     mutationFn: (techniqueId: string) => api.approve(techniqueId),
@@ -75,61 +78,33 @@ function ApprovalsPage() {
         queryClient.cancelQueries({ queryKey: ["techniques"] }),
       ])
 
-      const pendingSnapshot = queryClient.getQueryData<PendingResponse>(
-        queryKeys.pending,
-      )
-      const stateSnapshot = queryClient.getQueryData<StateSummary>(
-        queryKeys.state,
-      )
-      const techniqueSnapshot = queryClient.getQueryData<Technique>(
-        queryKeys.technique(techniqueId),
-      )
-      const techniquesSnapshots =
-        queryClient.getQueriesData<TechniquesResponse>({
-          queryKey: ["techniques"],
-        })
-
-      optimisticUpdateTechnique(queryClient, techniqueId, (technique) => {
-        const total = (technique.total_rules ?? 0) + 1
-        const enabled = (technique.enabled_rules ?? 0) + 1
-
-        return {
-          ...technique,
-          pending_approval: false,
-          approved: true,
-          deployed: true,
-          rejected: false,
-          verdict: "COVERED",
-          total_rules: total,
-          enabled_rules: enabled,
-          enabled_percentage: total > 0 ? round1((enabled / total) * 100) : 0,
-        }
+      const loadingToastId = pushToast({
+        kind: "loading",
+        title: "Approving rule",
+        message: `Deploying ${techniqueId} to Splunk...`,
+        sticky: true,
       })
 
-      queryClient.setQueryData<StateSummary | undefined>(
-        queryKeys.state,
-        (current) => {
-          if (!current) return current
-          return {
-            ...current,
-            pending_approvals: Math.max(0, current.pending_approvals - 1),
-          }
-        },
-      )
-
-      return {
-        pendingSnapshot,
-        stateSnapshot,
-        techniqueSnapshot,
-        techniquesSnapshots,
-      }
+      return { loadingToastId }
     },
     onError: (mutationError, techniqueId, context) => {
-      restoreSnapshots(queryClient, techniqueId, context)
-      addToast("error", getErrorMessage(mutationError, "Approval failed"))
+      if (context?.loadingToastId) dismissToast(context.loadingToastId)
+      pushToast({
+        kind: "error",
+        title: "Approval failed",
+        message: getErrorMessage(
+          mutationError,
+          `Failed to approve ${techniqueId}`,
+        ),
+      })
     },
-    onSuccess: (result) => {
-      addToast("success", `Approved and deployed ${result.technique_id}`)
+    onSuccess: (result, _techniqueId, context) => {
+      if (context?.loadingToastId) dismissToast(context.loadingToastId)
+      pushToast({
+        kind: "success",
+        title: "Rule approved",
+        message: `${result.technique_id} deployed successfully`,
+      })
     },
     onSettled: async (_result, _error, techniqueId) => {
       await Promise.all([
@@ -169,58 +144,34 @@ function ApprovalsPage() {
         queryClient.cancelQueries({ queryKey: ["techniques"] }),
       ])
 
-      const pendingSnapshot = queryClient.getQueryData<PendingResponse>(
-        queryKeys.pending,
-      )
-      const stateSnapshot = queryClient.getQueryData<StateSummary>(
-        queryKeys.state,
-      )
-      const techniqueSnapshot = queryClient.getQueryData<Technique>(
-        queryKeys.technique(techniqueId),
-      )
-      const techniquesSnapshots =
-        queryClient.getQueriesData<TechniquesResponse>({
-          queryKey: ["techniques"],
-        })
+      const loadingToastId = pushToast({
+        kind: "loading",
+        title: "Rejecting rule",
+        message: `Processing rejection for ${techniqueId}...`,
+        sticky: true,
+      })
 
-      optimisticUpdateTechnique(queryClient, techniqueId, (technique) => ({
-        ...technique,
-        pending_approval: false,
-        approved: false,
-        deployed: false,
-        rejected: true,
-        generated_rule: null,
-        rule_explanation: null,
-        rule_confidence: null,
-      }))
-
-      queryClient.setQueryData<StateSummary | undefined>(
-        queryKeys.state,
-        (current) => {
-          if (!current) return current
-          return {
-            ...current,
-            pending_approvals: Math.max(0, current.pending_approvals - 1),
-          }
-        },
-      )
-
-      return {
-        pendingSnapshot,
-        stateSnapshot,
-        techniqueSnapshot,
-        techniquesSnapshots,
-      }
+      return { loadingToastId }
     },
     onError: (mutationError, variables, context) => {
-      restoreSnapshots(queryClient, variables.techniqueId, context)
-      addToast("error", getErrorMessage(mutationError, "Rejection failed"))
+      if (context?.loadingToastId) dismissToast(context.loadingToastId)
+      pushToast({
+        kind: "error",
+        title: "Rejection failed",
+        message: getErrorMessage(
+          mutationError,
+          `Failed to reject ${variables.techniqueId}`,
+        ),
+      })
     },
-    onSuccess: (result, variables) => {
-      const withReason = variables.reason
-        ? ` (reason: ${variables.reason})`
-        : ""
-      addToast("success", `Rejected ${result.technique_id}${withReason}`)
+    onSuccess: (result, variables, context) => {
+      if (context?.loadingToastId) dismissToast(context.loadingToastId)
+      const withReason = variables.reason ? ` (${variables.reason})` : ""
+      pushToast({
+        kind: "info",
+        title: "Rule rejected",
+        message: `${result.technique_id}${withReason}`,
+      })
     },
     onSettled: async (_result, _error, variables) => {
       await Promise.all([
@@ -321,19 +272,37 @@ function ApprovalsPage() {
         </p>
       </header>
 
-      <div className="pointer-events-none fixed right-6 top-6 z-50 flex w-xs flex-col gap-2">
+      <div className="pointer-events-none fixed right-6 top-6 z-50 flex w-sm flex-col gap-2">
         {toasts.map((toast) => (
-          <div
+          <article
             key={toast.id}
-            className={[
-              "pointer-events-auto rounded-lg border px-3 py-2 text-sm shadow-lg backdrop-blur",
-              toast.kind === "success"
-                ? "border-verdict-covered/50 bg-surface-800/95 text-verdict-covered"
-                : "border-verdict-gap/50 bg-surface-800/95 text-verdict-gap",
-            ].join(" ")}
+            className="pointer-events-auto rounded-xl border border-surface-600/80 bg-surface-800/95 p-3 shadow-[0_14px_34px_rgba(0,0,0,0.35)] backdrop-blur"
           >
-            {toast.message}
-          </div>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className={toastAccentClass(toast.kind)}>
+                    {toastIcon(toast.kind)}
+                  </span>
+                  <p className="text-base text-accent-glow">{toast.title}</p>
+                </div>
+                {toast.message ? (
+                  <p className="mt-1 text-sm text-ink-secondary">
+                    {toast.message}
+                  </p>
+                ) : null}
+              </div>
+
+              <button
+                type="button"
+                aria-label="Dismiss notification"
+                className="cursor-pointer rounded-md p-1 text-ink-muted transition hover:bg-surface-700/70 hover:text-ink-secondary"
+                onClick={() => dismissToast(toast.id)}
+              >
+                ✕
+              </button>
+            </div>
+          </article>
         ))}
       </div>
 
@@ -575,58 +544,88 @@ function ApprovalsPage() {
   )
 }
 
-function restoreSnapshots(
-  queryClient: ReturnType<typeof useQueryClient>,
-  techniqueId: string,
-  context: SnapshotContext | undefined,
-) {
-  if (!context) return
-
-  queryClient.setQueryData(queryKeys.pending, context.pendingSnapshot)
-  queryClient.setQueryData(queryKeys.state, context.stateSnapshot)
-  queryClient.setQueryData(
-    queryKeys.technique(techniqueId),
-    context.techniqueSnapshot,
-  )
-
-  for (const [key, value] of context.techniquesSnapshots ?? []) {
-    queryClient.setQueryData(key, value)
+function toastIcon(kind: ToastKind) {
+  if (kind === "success") {
+    return (
+      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" aria-hidden>
+        <path
+          d="M20 7L9.5 17.5 4 12"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    )
   }
+
+  if (kind === "error") {
+    return (
+      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" aria-hidden>
+        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+        <path
+          d="M15 9L9 15M9 9l6 6"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    )
+  }
+
+  if (kind === "loading") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        className="h-3.5 w-3.5 animate-spin"
+        fill="none"
+        aria-hidden
+      >
+        <circle
+          cx="12"
+          cy="12"
+          r="9"
+          stroke="currentColor"
+          strokeOpacity="0.28"
+          strokeWidth="2"
+        />
+        <path
+          d="M12 3a9 9 0 019 9"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    )
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+      <path
+        d="M12 10.5V16M12 7.5h.01"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
 }
 
-function optimisticUpdateTechnique(
-  queryClient: ReturnType<typeof useQueryClient>,
-  techniqueId: string,
-  update: (technique: Technique) => Technique,
-) {
-  queryClient.setQueryData<PendingResponse | undefined>(
-    queryKeys.pending,
-    (current) => {
-      if (!current) return current
-      return {
-        pending: current.pending.filter((t) => t.technique_id !== techniqueId),
-        count: Math.max(0, current.count - 1),
-      }
-    },
-  )
+function toastAccentClass(kind: ToastKind) {
+  if (kind === "success") {
+    return "inline-flex h-5 w-5 items-center justify-center rounded-full border border-verdict-covered/55 text-verdict-covered"
+  }
 
-  queryClient.setQueriesData<TechniquesResponse | undefined>(
-    { queryKey: ["techniques"] },
-    (current) => {
-      if (!current) return current
-      return {
-        ...current,
-        techniques: current.techniques.map((t) =>
-          t.technique_id === techniqueId ? update(t) : t,
-        ),
-      }
-    },
-  )
+  if (kind === "error") {
+    return "inline-flex h-5 w-5 items-center justify-center rounded-full border border-verdict-gap/55 text-verdict-gap"
+  }
 
-  queryClient.setQueryData<Technique | undefined>(
-    queryKeys.technique(techniqueId),
-    (current) => (current ? update(current) : current),
-  )
+  if (kind === "loading") {
+    return "inline-flex h-5 w-5 items-center justify-center rounded-full border border-verdict-partial/55 text-verdict-partial"
+  }
+
+  return "inline-flex h-5 w-5 items-center justify-center rounded-full border border-accent-primary/55 text-accent-primary"
 }
 
 function formatConfidence(confidence: number | null) {
@@ -645,8 +644,4 @@ function truncateSPL(spl: string | null) {
   if (!spl) return "No generated SPL available"
   if (spl.length <= 220) return spl
   return `${spl.slice(0, 220)}...`
-}
-
-function round1(value: number) {
-  return Math.round(value * 10) / 10
 }
