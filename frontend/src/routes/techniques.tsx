@@ -1,10 +1,5 @@
 import { useMemo, useState } from "react"
-import {
-  Outlet,
-  createFileRoute,
-  useNavigate,
-  useRouterState,
-} from "@tanstack/react-router"
+import { Outlet, createFileRoute, useRouterState } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { api } from "../api/client"
 import { getErrorMessage } from "../lib/errors"
@@ -15,7 +10,7 @@ export const Route = createFileRoute("/techniques")({
 })
 
 function TechniquesPage() {
-  const navigate = useNavigate()
+  const navigate = Route.useNavigate()
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   })
