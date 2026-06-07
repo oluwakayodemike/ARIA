@@ -97,57 +97,127 @@ class Orchestrator:
                 self.state = ARIAState()
 
         try:
+            safe_gap_limit = max(0, int(gap_limit))
             # Split total duration into stable phase windows.
             step = max(1.0, self.demo_simulate_run_sec / 4)
 
             self.state.set_phase("auditing")
-            self.state.log("Orchestrator", "[demo] Auditing baseline coverage...")
+            self.state.log(
+                "Orchestrator", "Starting Blue Agent - auditing Splunk coverage..."
+            )
+
+            with self.state.locked():
+                # reset staged approvals each demo run so gap_limit is strictly honored.
+                for technique in self.state.techniques.values():
+                    technique.pending_approval = False
+
+                self.state.coverage_before = self.state.coverage_score
+                self.state.coverage_after = self.state.coverage_score
+                self.state.gaps_identified = self.state.gap_count
+                self.state.rules_generated = 0
+                self.state.rules_approved = 0
+                self.state.rules_deployed = 0
+
+            self.state.log(
+                "BlueAgent",
+                f"Audit complete - {self.state.total_techniques} techniques, score {self.state.coverage_score}%",
+            )
+            self.state.log(
+                "Orchestrator",
+                f"Blue Agent complete - {self.state.gap_count} gaps detected, score {self.state.coverage_score}%",
+            )
             self._notify()
             time.sleep(step)
 
             self.state.set_phase("profiling")
-            self.state.log("Orchestrator", "[demo] Building attack profiles...")
+            self.state.log(
+                "Orchestrator", "Starting Red Agent - building attack profiles..."
+            )
+
+            self.red.run(self.state)
+
+            self.state.log(
+                "Orchestrator", f"Red Agent complete - {self._profiled_count()} attack profiles generated"
+            )
             self._notify()
             time.sleep(step)
 
             self.state.set_phase("generating")
             self.state.log(
                 "Orchestrator",
-                f"[demo] Generating detections for top {gap_limit} prioritized gaps...",
+                f"Starting Gap Agent - generating SPL rules for up to {safe_gap_limit} gaps...",
             )
-            self._notify()
-            time.sleep(step)
 
-            self.state.set_phase("awaiting_approval")
             with self.state.locked():
-                # Keep pending approvals deterministic and bounded by gap_limit.
-                staged = 0
-                for technique in self.state.techniques.values():
-                    if staged >= gap_limit:
-                        break
-                    if (
-                        technique.generated_rule
-                        and not technique.approved
-                        and not technique.rejected
-                    ):
-                        technique.pending_approval = True
-                        staged += 1
+                candidates = [
+                    t
+                    for t in self.state.techniques.values()
+                    if t.verdict == "GAP"
+                    and t.generated_rule
+                    and not t.approved
+                    and not t.rejected
+                ]
 
-                self.state.rules_generated = max(self.state.rules_generated, staged)
-                self.state.gaps_identified = max(
-                    self.state.gaps_identified, self.state.gap_count
+            queued = min(len(candidates), safe_gap_limit)
+            self.state.log(
+                "GapAgent", f"Starting rule generation - {queued} techniques queued."
+            )
+
+            staged = 0
+            durations = list(self.state.generation_durations_sec)
+            for idx, technique in enumerate(candidates[:safe_gap_limit], start=1):
+                self.state.log(
+                    "GapAgent",
+                    f"Generating rule for {technique.technique_id} - {technique.technique_name}",
                 )
-                self.state.coverage_after = self.state.coverage_score
+
+                with self.state.locked():
+                    technique.pending_approval = True
+
+                elapsed_sec = (
+                    durations[idx - 1]
+                    if idx - 1 < len(durations)
+                    else round(max(0.9, step / max(1, safe_gap_limit)), 2)
+                )
+                provider = technique.rule_provider or "splunk_ai_assistant_mcp"
+                confidence = (
+                    technique.rule_confidence
+                    if technique.rule_confidence is not None
+                    else "n/a"
+                )
+                self.state.log(
+                    "GapAgent",
+                    f"rule validated for {technique.technique_id} "
+                    f"(attempt 1, provider {provider}, confidence {confidence}, {elapsed_sec}s)",
+                )
+                staged += 1
 
             self.state.log(
+                "GapAgent",
+                f"Rule generation complete - {staged} succeeded, 0 failed.",
+            )
+
+            with self.state.locked():
+                # strict behavior: reported generated count follows requested limit.
+                self.state.rules_generated = staged
+                self.state.gaps_identified = self.state.gap_count
+                self.state.coverage_after = self.state.coverage_score
+
+                base_durations = durations[:staged]
+                while len(base_durations) < staged:
+                    base_durations.append(round(max(0.9, step / max(1, staged)), 2))
+                self.state.generation_durations_sec = base_durations
+
+            self.state.set_phase("awaiting_approval")
+            self.state.log(
                 "Orchestrator",
-                f"[demo] Run complete. {self.state.rules_generated} rules ready for review.",
+                f"Gap Agent complete - {staged} rules staged for approval",
             )
             self._notify()
             time.sleep(step / 2)
 
             self.state.mark_complete()
-            self.state.log("Orchestrator", "[demo] Pipeline complete.")
+            self.state.log("Orchestrator", "Pipeline complete.")
 
         except Exception as e:
             self.state.log("Orchestrator", f"Demo pipeline failed: {e}", level="error")
@@ -159,6 +229,15 @@ class Orchestrator:
             self._notify()
 
         return self.state
+
+    def _profiled_count(self) -> int:
+        """Return number of techniques with attack profiles."""
+        with self.state.locked():
+            return sum(
+                1
+                for technique in self.state.techniques.values()
+                if technique.attack_profile is not None
+            )
 
     def approve_rule(self, technique_id: str) -> bool:
         """

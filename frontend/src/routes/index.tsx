@@ -165,7 +165,7 @@ function OverviewPage() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <MetricCard
           title="Phase"
-          value={state?.phase ?? "—"}
+          value={state ? formatPhaseLabel(state.phase) : "—"}
           loading={isStateLoading}
           error={
             isStateError
@@ -385,6 +385,11 @@ function MetricCard({
   loading: boolean
   error: string | null
 }) {
+  const valueClassName =
+    title === "Phase"
+      ? "mt-2 break-words text-xl font-semibold leading-tight text-accent-glow"
+      : "mt-2 text-2xl font-semibold text-accent-glow"
+
   return (
     <article className="glass-card p-4">
       <p className="muted-label">{title}</p>
@@ -393,8 +398,12 @@ function MetricCard({
       ) : error ? (
         <p className="mt-2 text-sm text-verdict-gap">{error}</p>
       ) : (
-        <p className="mt-2 text-2xl font-semibold text-accent-glow">{value}</p>
+        <p className={valueClassName}>{value}</p>
       )}
     </article>
   )
+}
+
+function formatPhaseLabel(phase: StateSummary["phase"]) {
+  return phase.replace(/_/g, " ")
 }
