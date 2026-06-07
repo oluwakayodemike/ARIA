@@ -1,5 +1,5 @@
-import uuid
 import threading
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -12,7 +12,7 @@ def _utcnow() -> str:
 
 def _run_id() -> str:
     """Unique run ID — timestamp + short UUID suffix to avoid same-second collisions."""
-    ts    = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     short = uuid.uuid4().hex[:6]
     return f"{ts}_{short}"
 
@@ -20,49 +20,54 @@ def _run_id() -> str:
 @dataclass
 class TechniqueState:
     """Represents ARIA's full knowledge about one ATT&CK technique."""
-    technique_id      : str
-    technique_name    : str
-    verdict           : str                      # COVERED | PARTIAL | GAP
-    tactics           : list  = field(default_factory=list)
-    total_rules       : int   = 0
-    enabled_rules     : int   = 0
+
+    technique_id: str
+    technique_name: str
+    verdict: str  # COVERED | PARTIAL | GAP
+    tactics: list = field(default_factory=list)
+    total_rules: int = 0
+    enabled_rules: int = 0
     enabled_percentage: float = 0.0
 
     # MITRE source data populated by Blue Agent and read by Red Agent
-    description       : str   = ""
-    detection         : str   = ""
+    description: str = ""
+    detection: str = ""
 
-    attack_profile    : Optional[dict] = None
+    attack_profile: Optional[dict] = None
 
-    generated_rule    : Optional[str]  = None
-    rule_explanation  : Optional[str]  = None
-    rule_confidence   : Optional[float] = None   # None = not yet scored, 0.0 = very low
+    generated_rule: Optional[str] = None
+    rule_explanation: Optional[str] = None
+    rule_confidence: Optional[float] = None  # None = not yet scored, 0.0 = very low
+    rule_provider: Optional[str] = None
+    rule_provider_trace: list[str] = field(default_factory=list)
 
-    pending_approval  : bool = False
-    approved          : bool = False
-    rejected          : bool = False
-    deployed          : bool = False
+    pending_approval: bool = False
+    approved: bool = False
+    rejected: bool = False
+    deployed: bool = False
 
     def to_dict(self) -> dict:
         """JSON-serializable representation. Used by API and state persistence."""
         return {
-            "technique_id"      : self.technique_id,
-            "technique_name"    : self.technique_name,
-            "verdict"           : self.verdict,
-            "tactics"           : self.tactics,
-            "total_rules"       : self.total_rules,
-            "enabled_rules"     : self.enabled_rules,
+            "technique_id": self.technique_id,
+            "technique_name": self.technique_name,
+            "verdict": self.verdict,
+            "tactics": self.tactics,
+            "total_rules": self.total_rules,
+            "enabled_rules": self.enabled_rules,
             "enabled_percentage": self.enabled_percentage,
-            "description"       : self.description,
-            "detection"         : self.detection,
-            "attack_profile"    : self.attack_profile,
-            "generated_rule"    : self.generated_rule,
-            "rule_explanation"  : self.rule_explanation,
-            "rule_confidence"   : self.rule_confidence,
-            "pending_approval"  : self.pending_approval,
-            "approved"          : self.approved,
-            "rejected"          : self.rejected,
-            "deployed"          : self.deployed,
+            "description": self.description,
+            "detection": self.detection,
+            "attack_profile": self.attack_profile,
+            "generated_rule": self.generated_rule,
+            "rule_explanation": self.rule_explanation,
+            "rule_confidence": self.rule_confidence,
+            "rule_provider": self.rule_provider,
+            "rule_provider_trace": self.rule_provider_trace,
+            "pending_approval": self.pending_approval,
+            "approved": self.approved,
+            "rejected": self.rejected,
+            "deployed": self.deployed,
         }
 
 
@@ -73,21 +78,31 @@ class ARIAState:
     Orchestrator owns this. All agents receive it and return updates.
     Thread-safe: all reads and writes go through the state lock.
     """
-    run_id          : str  = field(default_factory=_run_id)
-    started_at      : str  = field(default_factory=_utcnow)
-    completed_at    : Optional[str] = None
 
-    techniques      : dict[str, TechniqueState] = field(default_factory=dict)
-    coverage_score  : float = 0.0
-    total_techniques: int   = 0
-    covered_count   : int   = 0
-    partial_count   : int   = 0
-    gap_count       : int   = 0
+    run_id: str = field(default_factory=_run_id)
+    started_at: str = field(default_factory=_utcnow)
+    completed_at: Optional[str] = None
 
-    phase           : str   = "idle"  # idle | auditing | profiling | generating | awaiting_approval | done | error
-    errors          : list  = field(default_factory=list)
+    techniques: dict[str, TechniqueState] = field(default_factory=dict)
+    coverage_score: float = 0.0
+    total_techniques: int = 0
+    covered_count: int = 0
+    partial_count: int = 0
+    gap_count: int = 0
 
-    reasoning_log   : list  = field(default_factory=list)
+    phase: str = "idle"  # idle | auditing | profiling | generating | awaiting_approval | done | error
+    errors: list = field(default_factory=list)
+
+    reasoning_log: list = field(default_factory=list)
+
+    # Quantified impact metrics for demo/reporting.
+    coverage_before: float = 0.0
+    coverage_after: float = 0.0
+    gaps_identified: int = 0
+    rules_generated: int = 0
+    rules_approved: int = 0
+    rules_deployed: int = 0
+    generation_durations_sec: list[float] = field(default_factory=list)
 
     def __post_init__(self):
         # RLock allows nested acquisition across helper methods.
@@ -106,9 +121,9 @@ class ARIAState:
         """
         entry = {
             "timestamp": _utcnow(),
-            "agent"    : agent,
-            "level"    : level,
-            "message"  : message,
+            "agent": agent,
+            "level": level,
+            "message": message,
         }
         with self._state_lock:
             self.reasoning_log.append(entry)
@@ -121,32 +136,32 @@ class ARIAState:
     def update_from_blue(self, coverage_map: dict, score: dict):
         """Orchestrator calls this after Blue Agent runs."""
         with self._state_lock:
-            self.coverage_score   = score["score"]
+            self.coverage_score = score["score"]
             self.total_techniques = score["total"]
-            self.covered_count    = score["covered"]
-            self.partial_count    = score["partial"]
-            self.gap_count        = score["gaps"]
+            self.covered_count = score["covered"]
+            self.partial_count = score["partial"]
+            self.gap_count = score["gaps"]
 
             self.techniques.clear()
 
             for tid, data in coverage_map.items():
                 self.techniques[tid] = TechniqueState(
-                    technique_id       = data["technique_id"],
-                    technique_name     = data["technique_name"],
-                    tactics            = data.get("tactics") or [],
-                    verdict            = data["verdict"],
-                    total_rules        = data["total_rules"],
-                    enabled_rules      = data["enabled_rules"],
-                    enabled_percentage = data["enabled_percentage"],
-                    description        = data.get("description", ""),
-                    detection          = data.get("detection", ""),
+                    technique_id=data["technique_id"],
+                    technique_name=data["technique_name"],
+                    tactics=data.get("tactics") or [],
+                    verdict=data["verdict"],
+                    total_rules=data["total_rules"],
+                    enabled_rules=data["enabled_rules"],
+                    enabled_percentage=data["enabled_percentage"],
+                    description=data.get("description", ""),
+                    detection=data.get("detection", ""),
                 )
 
     def mark_complete(self):
         """Orchestrator calls this when the full pipeline finishes."""
         with self._state_lock:
             self.completed_at = _utcnow()
-            self.phase        = "done"
+            self.phase = "done"
 
     def set_phase(self, phase: str):
         """Set the pipeline phase in a thread-safe way."""
@@ -171,34 +186,61 @@ class ARIAState:
     def to_summary(self) -> dict:
         """Lightweight snapshot the API broadcasts to the frontend."""
         with self._state_lock:
+            avg_generation_time = (
+                round(
+                    sum(self.generation_durations_sec)
+                    / len(self.generation_durations_sec),
+                    2,
+                )
+                if self.generation_durations_sec
+                else 0.0
+            )
+
+            analyst_minutes_saved = self.rules_generated * 15
+
             return {
-                "run_id"           : self.run_id,
-                "phase"            : self.phase,
-                "coverage_score"   : self.coverage_score,
-                "total_techniques" : self.total_techniques,
-                "covered_count"    : self.covered_count,
-                "partial_count"    : self.partial_count,
-                "gap_count"        : self.gap_count,
+                "run_id": self.run_id,
+                "phase": self.phase,
+                "coverage_score": self.coverage_score,
+                "total_techniques": self.total_techniques,
+                "covered_count": self.covered_count,
+                "partial_count": self.partial_count,
+                "gap_count": self.gap_count,
                 "pending_approvals": len(self.get_pending_approvals()),
-                "error_count"      : len(self.errors),
-                "reasoning_log"    : [e.copy() for e in self.reasoning_log[-20:]],
+                "error_count": len(self.errors),
+                "reasoning_log": [e.copy() for e in self.reasoning_log[-20:]],
+                "coverage_before": self.coverage_before,
+                "coverage_after": self.coverage_after,
+                "gaps_identified": self.gaps_identified,
+                "rules_generated": self.rules_generated,
+                "rules_approved": self.rules_approved,
+                "rules_deployed": self.rules_deployed,
+                "avg_generation_time": avg_generation_time,
+                "analyst_minutes_saved_estimate": analyst_minutes_saved,
             }
 
     def to_dict(self) -> dict:
         """Full JSON-serializable state dump. Used for persistence and debugging."""
         with self._state_lock:
             return {
-                "run_id"          : self.run_id,
-                "started_at"      : self.started_at,
-                "completed_at"    : self.completed_at,
-                "phase"           : self.phase,
-                "coverage_score"  : self.coverage_score,
+                "run_id": self.run_id,
+                "started_at": self.started_at,
+                "completed_at": self.completed_at,
+                "phase": self.phase,
+                "coverage_score": self.coverage_score,
                 "total_techniques": self.total_techniques,
-                "covered_count"   : self.covered_count,
-                "partial_count"   : self.partial_count,
-                "gap_count"       : self.gap_count,
-                "errors"          : [e.copy() for e in self.errors],
-                "reasoning_log"   : [e.copy() for e in self.reasoning_log],
-                "techniques"      : {tid: t.to_dict()
-                                     for tid, t in self.techniques.items()},
+                "covered_count": self.covered_count,
+                "partial_count": self.partial_count,
+                "gap_count": self.gap_count,
+                "errors": [e.copy() for e in self.errors],
+                "reasoning_log": [e.copy() for e in self.reasoning_log],
+                "coverage_before": self.coverage_before,
+                "coverage_after": self.coverage_after,
+                "gaps_identified": self.gaps_identified,
+                "rules_generated": self.rules_generated,
+                "rules_approved": self.rules_approved,
+                "rules_deployed": self.rules_deployed,
+                "generation_durations_sec": self.generation_durations_sec.copy(),
+                "analyst_minutes_saved_estimate": self.rules_generated * 15,
+                "techniques": {tid: t.to_dict() for tid, t in self.techniques.items()},
             }

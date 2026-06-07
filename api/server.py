@@ -5,7 +5,6 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Optional, Set
 
-import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,16 +17,17 @@ from core.splunk_client import SplunkClient
 
 load_dotenv()
 
-_orchestrator : Optional[Orchestrator] = None
-_ws_clients   : Set[WebSocket]         = set()
+_orchestrator: Optional[Orchestrator] = None
+_ws_clients: Set[WebSocket] = set()
 _broadcast_task: Optional[asyncio.Task] = None
+
 
 async def _broadcast_loop():
     while True:
         try:
             if _orchestrator and _ws_clients:
                 payload = _orchestrator.get_summary()
-                dead    = set()
+                dead = set()
 
                 for ws in list(_ws_clients):
                     try:
@@ -41,6 +41,7 @@ async def _broadcast_loop():
 
         await asyncio.sleep(0.5)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _orchestrator, _broadcast_task
@@ -49,18 +50,25 @@ async def lifespan(app: FastAPI):
     connected = splunk.connect()
     if not connected:
         raise RuntimeError(
-            "Splunk connection failed. "
-            "Ensure Splunk is running on localhost:8089."
+            "Splunk connection failed. Ensure Splunk is running on localhost:8089."
         )
 
-    mitre     = MitreLoader()
+    mitre = MitreLoader()
     gap_agent = GapAgent(splunk_client=splunk)
 
-    _orchestrator  = Orchestrator(
-        splunk_client  = splunk,
-        gap_agent      = gap_agent,
-        mitre_loader   = mitre,
+    _orchestrator = Orchestrator(
+        splunk_client=splunk,
+        gap_agent=gap_agent,
+        mitre_loader=mitre,
     )
+
+    bootstrapped = _orchestrator.bootstrap_state_from_splunk()
+    if bootstrapped:
+        print("ARIA startup baseline loaded from Splunk + KV memory.")
+    else:
+        print(
+            "ARIA startup baseline load skipped/failed; state will populate on first run."
+        )
 
     _broadcast_task = asyncio.create_task(_broadcast_loop())
     print("ARIA API started. Splunk connected, orchestrator ready.")
@@ -74,22 +82,25 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
 
+
 app = FastAPI(
-    title       = "ARIA - Autonomous Red-Blue Intelligence Agent",
-    description = "Backend API for the ARIA security coverage platform.",
-    version     = "1.0.0",
-    lifespan    = lifespan,
+    title="ARIA - Autonomous Red-Blue Intelligence Agent",
+    description="Backend API for the ARIA security coverage platform.",
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins  = ["*"],
-    allow_methods  = ["*"],
-    allow_headers  = ["*"],
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+
 
 class RunRequest(BaseModel):
     gap_limit: int = 10
+
 
 class RejectRequest(BaseModel):
     reason: str = ""
@@ -108,9 +119,9 @@ async def health():
     orch = _require_orchestrator()
     summary = orch.get_summary()
     return {
-        "status"    : "ok",
+        "status": "ok",
         "is_running": orch.is_running,
-        "phase"     : summary["phase"],
+        "phase": summary["phase"],
     }
 
 
@@ -121,11 +132,11 @@ async def get_state():
 
 @app.get("/api/techniques")
 async def get_techniques(verdict: Optional[str] = None):
-    orch       = _require_orchestrator()
+    orch = _require_orchestrator()
     techniques = orch.get_all_techniques()
 
     if verdict:
-        verdict    = verdict.upper()
+        verdict = verdict.upper()
         techniques = [t for t in techniques if t["verdict"] == verdict]
 
     return {"techniques": techniques, "total": len(techniques)}
@@ -134,19 +145,19 @@ async def get_techniques(verdict: Optional[str] = None):
 @app.get("/api/techniques/{technique_id}")
 async def get_technique(technique_id: str):
     orch = _require_orchestrator()
-    t    = orch.get_technique(technique_id.upper())
+    t = orch.get_technique(technique_id.upper())
 
     if not t:
         raise HTTPException(
-            status_code = 404,
-            detail      = f"Technique {technique_id} not found in current run."
+            status_code=404,
+            detail=f"Technique {technique_id} not found in current run.",
         )
     return t
 
 
 @app.get("/api/pending")
 async def get_pending():
-    orch    = _require_orchestrator()
+    orch = _require_orchestrator()
     pending = orch.get_pending_approvals()
     return {"pending": pending, "count": len(pending)}
 
@@ -158,8 +169,8 @@ async def start_run(body: RunRequest):
 
     if orch.is_running:
         raise HTTPException(
-            status_code = 409,
-            detail      = "A run is already in progress. Wait for it to complete."
+            status_code=409,
+            detail="A run is already in progress. Wait for it to complete.",
         )
 
     loop = asyncio.get_running_loop()
@@ -170,30 +181,39 @@ async def start_run(body: RunRequest):
 
 @app.post("/api/approve/{technique_id}")
 async def approve_rule(technique_id: str):
-    orch    = _require_orchestrator()
-    success = orch.approve_rule(technique_id.upper())
+    orch = _require_orchestrator()
+    normalized_id = technique_id.upper()
 
-    if not success:
+    success = orch.approve_rule(normalized_id)
+    if success:
+        return {"status": "approved", "technique_id": normalized_id}
+
+    # if still pending after an attempted approval, deployment likely failed(e.g., Splunk rejected the saved search payload).
+    t = orch.get_technique(normalized_id)
+    if t and t.get("pending_approval"):
         raise HTTPException(
-            status_code = 404,
-            detail      = f"No pending rule found for {technique_id}."
+            status_code=502,
+            detail=f"Failed to deploy rule for {normalized_id} to Splunk.",
         )
 
-    return {"status": "approved", "technique_id": technique_id.upper()}
+    raise HTTPException(
+        status_code=404,
+        detail=f"No pending rule found for {normalized_id}.",
+    )
 
 
 @app.post("/api/reject/{technique_id}")
 async def reject_rule(technique_id: str, body: RejectRequest):
-    orch    = _require_orchestrator()
+    orch = _require_orchestrator()
     success = orch.reject_rule(technique_id.upper(), body.reason)
 
     if not success:
         raise HTTPException(
-            status_code = 404,
-            detail      = f"No pending rule found for {technique_id}."
+            status_code=404, detail=f"No pending rule found for {technique_id}."
         )
 
     return {"status": "rejected", "technique_id": technique_id.upper()}
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
