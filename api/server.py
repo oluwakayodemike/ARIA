@@ -10,10 +10,10 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from agents.gap_agent import GapAgent
 from agents.orchestrator import Orchestrator
+from config import ARIA_DEMO_FIXTURE_PATH, ARIA_DEMO_MODE, ARIA_DEMO_SIMULATE_RUN_SEC
+from core.demo_loader import load_demo_payload, state_from_demo_payload
 from core.mitre_loader import MitreLoader
-from core.splunk_client import SplunkClient
 
 load_dotenv()
 
@@ -46,32 +46,77 @@ async def _broadcast_loop():
 async def lifespan(app: FastAPI):
     global _orchestrator, _broadcast_task
 
-    splunk = SplunkClient()
-    connected = splunk.connect()
-    if not connected:
-        raise RuntimeError(
-            "Splunk connection failed. Ensure Splunk is running on localhost:8089."
+    if ARIA_DEMO_MODE:
+
+        class _DemoSplunkClient:
+            def validate_spl(self, _spl):
+                return {"valid": True, "error": None, "normalized": _spl}
+
+            def create_saved_search(self, *args, **kwargs):
+                return True
+
+            def save_rule_memory(self, **kwargs):
+                return True
+
+            def get_rule_memory_map(self):
+                return {}
+
+        class _DemoGapAgent:
+            def run(self, state, limit=5):
+                return state
+
+        demo_splunk = _DemoSplunkClient()
+        demo_gap_agent = _DemoGapAgent()
+
+        _orchestrator = Orchestrator(
+            splunk_client=demo_splunk,
+            gap_agent=demo_gap_agent,
+            mitre_loader=MitreLoader(),
+            demo_mode=True,
+            demo_simulate_run_sec=ARIA_DEMO_SIMULATE_RUN_SEC,
         )
 
-    mitre = MitreLoader()
-    gap_agent = GapAgent(splunk_client=splunk)
+        payload = load_demo_payload(ARIA_DEMO_FIXTURE_PATH)
+        _orchestrator.set_demo_seed_payload(payload)
+        _orchestrator.state = state_from_demo_payload(payload)
+        _orchestrator.state.log(
+            "Orchestrator", "Demo mode ready. Deterministic fixture loaded."
+        )
+        print("ARIA API started in DEMO MODE. External dependencies bypassed.")
 
-    _orchestrator = Orchestrator(
-        splunk_client=splunk,
-        gap_agent=gap_agent,
-        mitre_loader=mitre,
-    )
-
-    bootstrapped = _orchestrator.bootstrap_state_from_splunk()
-    if bootstrapped:
-        print("ARIA startup baseline loaded from Splunk + KV memory.")
     else:
-        print(
-            "ARIA startup baseline load skipped/failed; state will populate on first run."
+        from agents.gap_agent import GapAgent
+        from core.splunk_client import SplunkClient
+
+        splunk = SplunkClient()
+        connected = splunk.connect()
+        if not connected:
+            raise RuntimeError(
+                "Splunk connection failed. Ensure Splunk is running on localhost:8089."
+            )
+
+        mitre = MitreLoader()
+        gap_agent = GapAgent(splunk_client=splunk)
+
+        _orchestrator = Orchestrator(
+            splunk_client=splunk,
+            gap_agent=gap_agent,
+            mitre_loader=mitre,
+            demo_mode=False,
+            demo_simulate_run_sec=ARIA_DEMO_SIMULATE_RUN_SEC,
         )
+
+        bootstrapped = _orchestrator.bootstrap_state_from_splunk()
+        if bootstrapped:
+            print("ARIA startup baseline loaded from Splunk + KV memory.")
+        else:
+            print(
+                "ARIA startup baseline load skipped/failed; state will populate on first run."
+            )
+
+        print("ARIA API started. Splunk connected, orchestrator ready.")
 
     _broadcast_task = asyncio.create_task(_broadcast_loop())
-    print("ARIA API started. Splunk connected, orchestrator ready.")
 
     yield
 
@@ -122,6 +167,7 @@ async def health():
         "status": "ok",
         "is_running": orch.is_running,
         "phase": summary["phase"],
+        "demo_mode": bool(getattr(orch, "demo_mode", False)),
     }
 
 
@@ -174,7 +220,10 @@ async def start_run(body: RunRequest):
         )
 
     loop = asyncio.get_running_loop()
-    loop.run_in_executor(None, orch.run, body.gap_limit)
+    if getattr(orch, "demo_mode", False):
+        loop.run_in_executor(None, orch.run_demo, body.gap_limit)
+    else:
+        loop.run_in_executor(None, orch.run, body.gap_limit)
 
     return {"status": "started", "gap_limit": body.gap_limit}
 

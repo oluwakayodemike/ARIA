@@ -39,3 +39,8 @@ SPLUNK_AI_PRIMARY = _env_bool("SPLUNK_AI_PRIMARY", True)
 SPLUNK_MCP_TOOL_GENERATE = os.getenv("SPLUNK_MCP_TOOL_GENERATE", "saia_generate_spl")
 SPLUNK_MCP_TOOL_OPTIMIZE = os.getenv("SPLUNK_MCP_TOOL_OPTIMIZE", "saia_optimize_spl")
 SPLUNK_MCP_TOOL_EXPLAIN = os.getenv("SPLUNK_MCP_TOOL_EXPLAIN", "saia_explain_spl")
+
+# Demo mode
+ARIA_DEMO_MODE = _env_bool("ARIA_DEMO_MODE", False)
+ARIA_DEMO_FIXTURE_PATH = os.getenv("ARIA_DEMO_FIXTURE_PATH", "scripts/demo_state.json")
+ARIA_DEMO_SIMULATE_RUN_SEC = _env_int("ARIA_DEMO_SIMULATE_RUN_SEC", 12)

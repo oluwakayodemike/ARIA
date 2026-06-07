@@ -1,12 +1,12 @@
 import logging
 import threading
-from typing import Callable, Optional
+import time
+from typing import Any, Callable, Optional
 
 from agents.blue_agent import BlueAgent
-from agents.gap_agent import GapAgent
 from agents.red_agent import RedAgent
+from core.demo_loader import state_from_demo_payload
 from core.mitre_loader import MitreLoader
-from core.splunk_client import SplunkClient
 from core.state import ARIAState
 
 
@@ -26,10 +26,12 @@ class Orchestrator:
 
     def __init__(
         self,
-        splunk_client: SplunkClient,
-        gap_agent: GapAgent,
+        splunk_client: Any,
+        gap_agent: Any,
         mitre_loader: Optional[MitreLoader] = None,
         on_state_change: Optional[Callable[[dict], None]] = None,
+        demo_mode: bool = False,
+        demo_simulate_run_sec: int = 12,
     ):
         self.splunk = splunk_client
         self.mitre = mitre_loader or MitreLoader()
@@ -39,9 +41,17 @@ class Orchestrator:
         self.blue = BlueAgent(splunk_client, self.mitre)
         self.red = RedAgent()
 
+        self.demo_mode = bool(demo_mode)
+        self.demo_simulate_run_sec = max(4, int(demo_simulate_run_sec))
+        self._demo_seed_payload: Optional[dict] = None
+
         self.state = ARIAState()
         self._lock = threading.Lock()
         self.is_running = False
+
+    def set_demo_seed_payload(self, payload: dict):
+        """Store deterministic demo fixture payload used by run_demo()."""
+        self._demo_seed_payload = payload
 
     def run(self, gap_limit: int = 10) -> ARIAState:
         """
@@ -65,6 +75,82 @@ class Orchestrator:
 
         except Exception as e:
             self.state.log("Orchestrator", f"Pipeline failed: {e}", level="error")
+            self.state.set_phase("error")
+
+        finally:
+            with self._lock:
+                self.is_running = False
+            self._notify()
+
+        return self.state
+
+    def run_demo(self, gap_limit: int = 10) -> ARIAState:
+        """Deterministic simulation path for demos when external deps are unavailable."""
+        with self._lock:
+            if self.is_running:
+                raise RuntimeError("An ARIA run is already in progress.")
+            self.is_running = True
+
+            if self._demo_seed_payload:
+                self.state = state_from_demo_payload(self._demo_seed_payload)
+            else:
+                self.state = ARIAState()
+
+        try:
+            # Split total duration into stable phase windows.
+            step = max(1.0, self.demo_simulate_run_sec / 4)
+
+            self.state.set_phase("auditing")
+            self.state.log("Orchestrator", "[demo] Auditing baseline coverage...")
+            self._notify()
+            time.sleep(step)
+
+            self.state.set_phase("profiling")
+            self.state.log("Orchestrator", "[demo] Building attack profiles...")
+            self._notify()
+            time.sleep(step)
+
+            self.state.set_phase("generating")
+            self.state.log(
+                "Orchestrator",
+                f"[demo] Generating detections for top {gap_limit} prioritized gaps...",
+            )
+            self._notify()
+            time.sleep(step)
+
+            self.state.set_phase("awaiting_approval")
+            with self.state.locked():
+                # Keep pending approvals deterministic and bounded by gap_limit.
+                staged = 0
+                for technique in self.state.techniques.values():
+                    if staged >= gap_limit:
+                        break
+                    if (
+                        technique.generated_rule
+                        and not technique.approved
+                        and not technique.rejected
+                    ):
+                        technique.pending_approval = True
+                        staged += 1
+
+                self.state.rules_generated = max(self.state.rules_generated, staged)
+                self.state.gaps_identified = max(
+                    self.state.gaps_identified, self.state.gap_count
+                )
+                self.state.coverage_after = self.state.coverage_score
+
+            self.state.log(
+                "Orchestrator",
+                f"[demo] Run complete. {self.state.rules_generated} rules ready for review.",
+            )
+            self._notify()
+            time.sleep(step / 2)
+
+            self.state.mark_complete()
+            self.state.log("Orchestrator", "[demo] Pipeline complete.")
+
+        except Exception as e:
+            self.state.log("Orchestrator", f"Demo pipeline failed: {e}", level="error")
             self.state.set_phase("error")
 
         finally:
@@ -109,11 +195,14 @@ class Orchestrator:
                     technique.pending_approval = True
             return False
 
-        deployed = self.splunk.create_saved_search(
-            name=f"ARIA - {technique_id}: {technique_name}",
-            query=rule,
-            description=explanation,
-        )
+        if self.demo_mode:
+            deployed = True
+        else:
+            deployed = self.splunk.create_saved_search(
+                name=f"ARIA - {technique_id}: {technique_name}",
+                query=rule,
+                description=explanation,
+            )
 
         if not deployed:
             self.state.log(
@@ -165,25 +254,26 @@ class Orchestrator:
                 f"Rule deployed and approved for {technique_id} - {technique.technique_name}",
             )
 
-            persisted = self.splunk.save_rule_memory(
-                technique_id=technique.technique_id,
-                technique_name=technique.technique_name,
-                generated_rule=technique.generated_rule,
-                rule_explanation=technique.rule_explanation,
-                rule_confidence=technique.rule_confidence,
-                rule_provider=technique.rule_provider,
-                rule_provider_trace=technique.rule_provider_trace,
-                pending_approval=technique.pending_approval,
-                approved=technique.approved,
-                rejected=technique.rejected,
-                deployed=technique.deployed,
-            )
-            if not persisted:
-                self.state.log(
-                    "Orchestrator",
-                    f"Warning: failed to persist rule memory for {technique_id}",
-                    level="warning",
+            if not self.demo_mode:
+                persisted = self.splunk.save_rule_memory(
+                    technique_id=technique.technique_id,
+                    technique_name=technique.technique_name,
+                    generated_rule=technique.generated_rule,
+                    rule_explanation=technique.rule_explanation,
+                    rule_confidence=technique.rule_confidence,
+                    rule_provider=technique.rule_provider,
+                    rule_provider_trace=technique.rule_provider_trace,
+                    pending_approval=technique.pending_approval,
+                    approved=technique.approved,
+                    rejected=technique.rejected,
+                    deployed=technique.deployed,
                 )
+                if not persisted:
+                    self.state.log(
+                        "Orchestrator",
+                        f"Warning: failed to persist rule memory for {technique_id}",
+                        level="warning",
+                    )
 
         self._notify()
         return True
@@ -213,25 +303,26 @@ class Orchestrator:
                 message += f" - reason: {reason}"
             self.state.log("Orchestrator", message)
 
-            persisted = self.splunk.save_rule_memory(
-                technique_id=technique.technique_id,
-                technique_name=technique.technique_name,
-                generated_rule=technique.generated_rule,
-                rule_explanation=technique.rule_explanation,
-                rule_confidence=technique.rule_confidence,
-                rule_provider=technique.rule_provider,
-                rule_provider_trace=technique.rule_provider_trace,
-                pending_approval=technique.pending_approval,
-                approved=technique.approved,
-                rejected=technique.rejected,
-                deployed=technique.deployed,
-            )
-            if not persisted:
-                self.state.log(
-                    "Orchestrator",
-                    f"Warning: failed to persist rule memory for {technique_id}",
-                    level="warning",
+            if not self.demo_mode:
+                persisted = self.splunk.save_rule_memory(
+                    technique_id=technique.technique_id,
+                    technique_name=technique.technique_name,
+                    generated_rule=technique.generated_rule,
+                    rule_explanation=technique.rule_explanation,
+                    rule_confidence=technique.rule_confidence,
+                    rule_provider=technique.rule_provider,
+                    rule_provider_trace=technique.rule_provider_trace,
+                    pending_approval=technique.pending_approval,
+                    approved=technique.approved,
+                    rejected=technique.rejected,
+                    deployed=technique.deployed,
                 )
+                if not persisted:
+                    self.state.log(
+                        "Orchestrator",
+                        f"Warning: failed to persist rule memory for {technique_id}",
+                        level="warning",
+                    )
 
         self._notify()
         return True

@@ -1,0 +1,73 @@
+{
+  "phase": "idle",
+  "coverage_score": 42.5,
+  "total_techniques": 12,
+  "covered_count": 5,
+  "partial_count": 2,
+  "gap_count": 5,
+  "coverage_before": 42.5,
+  "coverage_after": 42.5,
+  "gaps_identified": 5,
+  "rules_generated": 3,
+  "rules_approved": 0,
+  "rules_deployed": 0,
+  "generation_durations_sec": [2.1, 2.8, 3.0],
+  "reasoning_log": [
+    {
+      "timestamp": "2026-01-01T00:00:00+00:00",
+      "agent": "Orchestrator",
+      "level": "info",
+      "message": "Demo baseline loaded from fixture."
+    }
+  ],
+  "techniques": {
+    "T1008": {
+      "technique_id": "T1008",
+      "technique_name": "Fallback Channels",
+      "verdict": "GAP",
+      "tactics": ["command-and-control"],
+      "generated_rule": "search index=dns sourcetype=bind query_length>60 | stats count by query",
+      "rule_explanation": "Flags suspicious long DNS querys and fallback channels.",
+      "rule_confidence": 0.8,
+      "rule_provider": "splunk_ai_assistant_mcp",
+      "rule_provider_trace": ["saia_generate_spl", "saia_optimize_spl"],
+      "pending_approval": true,
+      "approved": false,
+      "rejected": false,
+      "deployed": false
+    },
+    "T1566": {
+      "technique_id": "T1566",
+      "technique_name": "Phishing",
+      "verdict": "GAP",
+      "tactics": ["initial-access"],
+      "generated_rule": "search index=email (subject=*invoice* OR subject=*payment*) | stats count by sender",
+      "rule_explanation": "Detects invoice-themed phishing bursts from uncommon senders.",
+      "rule_confidence": 0.76,
+      "rule_provider": "gemini",
+      "rule_provider_trace": ["gemini_generate_content"],
+      "pending_approval": true,
+      "approved": false,
+      "rejected": false,
+      "deployed": false
+    },
+    "T1059": {
+      "technique_id": "T1059",
+      "technique_name": "Command and Scripting Interpreter",
+      "verdict": "COVERED",
+      "tactics": ["execution"],
+      "total_rules": 4,
+      "enabled_rules": 3,
+      "enabled_percentage": 75.0
+    },
+    "T1078": {
+      "technique_id": "T1078",
+      "technique_name": "Valid Accounts",
+      "verdict": "PARTIAL",
+      "tactics": ["initial-access"],
+      "total_rules": 2,
+      "enabled_rules": 0,
+      "enabled_percentage": 0.0
+    }
+  }
+}
