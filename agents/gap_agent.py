@@ -258,14 +258,16 @@ class GapAgent:
                         f"MCP error: {self._summarize_mcp_error(mcp_error)}"
                     ) from mcp_error
 
+                mcp_summary = self._summarize_mcp_error(mcp_error)
                 logging.warning(
-                    "Splunk MCP generation failed; using Gemini fallback. Detail: %s",
-                    mcp_error,
+                    "Splunk MCP generation failed; using Gemini fallback. %s",
+                    mcp_summary,
                 )
+                logging.debug("Full MCP fallback detail: %s", mcp_error)
                 state.log(
                     "GapAgent",
                     "Splunk MCP generation unavailable; using Gemini fallback. "
-                    f"{self._summarize_mcp_error(mcp_error)}",
+                    f"{mcp_summary}",
                     level="warning",
                 )
 
