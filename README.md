@@ -34,6 +34,10 @@ Challenge alignment:
 - Automate security workflows while keeping humans in the approval loop.
 - Use Splunk platform data, saved searches, lookup data, SPL validation, KV Store, and Splunk AI/MCP capabilities.
 
+## Submission Note
+
+ARIA is implemented as a Splunk AI Assistant/MCP-first workflow. During submission, our Splunk trial tenant had not yet received the required AI activation token, so the recorded live demo uses ARIA's fallback generation path while still using live Splunk for coverage audit, SPL parser validation, saved-search deployment, and KV Store lifecycle memory.
+
 ## Core Capabilities
 
 - Full MITRE ATT&CK technique audit using the local ATT&CK STIX dataset.
