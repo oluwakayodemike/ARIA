@@ -53,7 +53,7 @@ class GapAgent:
     def __init__(
         self,
         splunk_client: SplunkClient,
-        model_name: str = "gemini-2.5-flash",
+        model_name: str = "gemini-3.5-flash",
         mcp_client: SplunkMCPClient | None = None,
         ai_primary: bool = SPLUNK_AI_PRIMARY,
     ):
