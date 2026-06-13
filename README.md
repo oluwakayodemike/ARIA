@@ -6,8 +6,8 @@ Most organizations using Splunk can detect fewer than 10% of known MITRE ATT&CK 
 
 ARIA audits an organization's Splunk detection posture against MITRE ATT&CK, identifies uncovered techniques, generates validated SPL detection candidates with AI, and routes those candidates through a human approval workflow before deploying them back into Splunk.
 
-> **No Splunk? No problem.**
-> ARIA ships with a built-in demo mode. Run the full pipeline, coverage audit, attack profiling, SPL generation, and approval workflow, with a single environment variable. No Splunk, no API keys required.
+> **Reproducible demo mode included.**
+> ARIA ships with a built-in deterministic demo mode for offline reproducibility and judging flow walkthroughs. Live mode runs against real Splunk services for coverage audit, SPL validation, deployment, and rule lifecycle persistence.
 
 ## Why It Matters
 
@@ -34,9 +34,61 @@ Challenge alignment:
 - Automate security workflows while keeping humans in the approval loop.
 - Use Splunk platform data, saved searches, lookup data, SPL validation, KV Store, and Splunk AI/MCP capabilities.
 
-## Submission Note
+## Quick Reviewer Links
 
-ARIA is implemented as a Splunk AI Assistant/MCP-first workflow. During submission, our Splunk trial tenant had not yet received the required AI activation token, so the recorded live demo uses ARIA's fallback generation path while still using live Splunk for coverage audit, SPL parser validation, saved-search deployment, and KV Store lifecycle memory.
+- Demo video: https://youtu.be/e8mCmHSdUs0?si=VbXvtYNXLLXFglIU
+- Architecture diagram: [architecture_diagram.md](architecture_diagram.md)
+- MCP client implementation: [`core/splunk_mcp_client.py`](core/splunk_mcp_client.py)
+- MCP-first generation flow: [`agents/gap_agent.py`](agents/gap_agent.py)
+- Splunk SDK integration: [`core/splunk_client.py`](core/splunk_client.py)
+- Demo fixture used for deterministic runs: [`scripts/demo_state.json`](scripts/demo_state.json)
+
+## Splunk AI Capabilities Used
+
+ARIA is designed with **Splunk AI Assistant via Splunk MCP Server as the primary runtime generation path** for SPL detections.
+
+At runtime, ARIA attempts to discover and call Splunk AI Assistant MCP tools for:
+
+- SPL generation
+- SPL optimization
+- SPL explanation
+
+Implementation references:
+
+- [`core/splunk_mcp_client.py`](core/splunk_mcp_client.py) (MCP JSON-RPC client, tool discovery, tool invocation)
+- [`agents/gap_agent.py`](agents/gap_agent.py) (MCP-first generation flow, provider selection, provider tracing)
+
+For resiliency, ARIA includes a Gemini fallback path **only when MCP is unavailable or rejects requests**.
+
+## Runtime Note for This Submission
+
+During the submission window, our Splunk trial tenant's SAIA activation consistently failed with:
+
+> `Error generating Splunk Cloud access token.`
+
+Submission demo video: https://youtu.be/e8mCmHSdUs0?si=VbXvtYNXLLXFglIU
+
+Because of this platform-side activation blocker, recorded runs may show fallback generation for some techniques.
+
+Even in this state, ARIA still executes live Splunk runtime operations:
+
+- MITRE coverage audit from Splunk lookup data
+- SPL parser validation in Splunk
+- Saved-search deployment workflow
+- KV Store lifecycle persistence
+
+## Evidence Included in This Submission
+
+This repository and submission package include:
+
+- Source code proving MCP-first runtime integration ([`agents/gap_agent.py`](agents/gap_agent.py), [`core/splunk_mcp_client.py`](core/splunk_mcp_client.py))
+- Runtime behavior is visible in application logs, including MCP-attempt and fallback paths.
+
+## Compliance and Transparency Statement
+
+ARIA is not a mock-only prototype. It executes real runtime logic against Splunk APIs and includes implemented Splunk AI integration.
+
+Where SAIA activation could not be completed due to tenant provisioning issues, behavior and evidence are documented transparently in this submission.
 
 ## Core Capabilities
 
