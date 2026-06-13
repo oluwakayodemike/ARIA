@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import textwrap
@@ -53,7 +54,7 @@ class GapAgent:
     def __init__(
         self,
         splunk_client: SplunkClient,
-        model_name: str = "gemini-2.5-flash",
+        model_name: str = "gemini-3.5-flash",
         mcp_client: SplunkMCPClient | None = None,
         ai_primary: bool = SPLUNK_AI_PRIMARY,
     ):
@@ -254,12 +255,19 @@ class GapAgent:
                 if self.ai is None:
                     raise RuntimeError(
                         "Splunk MCP generation failed and Gemini fallback is unavailable. "
-                        f"MCP error: {mcp_error}"
+                        f"MCP error: {self._summarize_mcp_error(mcp_error)}"
                     ) from mcp_error
 
+                mcp_summary = self._summarize_mcp_error(mcp_error)
+                logging.warning(
+                    "Splunk MCP generation failed; using Gemini fallback. %s",
+                    mcp_summary,
+                )
+                logging.debug("Full MCP fallback detail: %s", mcp_error)
                 state.log(
                     "GapAgent",
-                    f"Splunk MCP generation unavailable, falling back to Gemini: {mcp_error}",
+                    "Splunk MCP generation unavailable; using Gemini fallback. "
+                    f"{mcp_summary}",
                     level="warning",
                 )
 
@@ -276,6 +284,42 @@ class GapAgent:
             "provider": "gemini",
             "provider_trace": ["gemini_generate_content"],
         }
+
+    def _summarize_mcp_error(self, error: Exception | str) -> str:
+        """
+        convert MCP exceptions into analyst-safe status text.
+        """
+        text = str(error)
+        lower = text.lower()
+
+        if "not configured" in lower or "url/token missing" in lower:
+            return "MCP endpoint or token is not configured."
+
+        if "could not find spl generation tool" in lower:
+            return "Required SPL generation tool was not available from MCP."
+
+        if "local variable 'configs' referenced before assignment" in lower:
+            return "Splunk AI Assistant tool returned an internal configuration error."
+
+        if "missing required argument: prompt" in lower:
+            return "Splunk AI Assistant tool rejected the request payload."
+
+        if "rejected all text argument variants" in lower:
+            return "Splunk AI Assistant tool rejected all supported request formats."
+
+        if "mcp http" in lower:
+            return "MCP server returned an HTTP error."
+
+        if "mcp request failed" in lower:
+            return "MCP server could not be reached."
+
+        if "mcp returned non-json" in lower:
+            return "MCP server returned an unexpected response format."
+
+        if "mcp error" in lower:
+            return "MCP server returned an error."
+
+        return "MCP generation failed."
 
     def _call_mcp_ai(self, profile: dict, previous_error: str | None) -> dict:
         if not self.mcp.is_configured():

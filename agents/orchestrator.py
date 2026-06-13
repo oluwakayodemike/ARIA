@@ -1,12 +1,12 @@
 import logging
 import threading
-from typing import Callable, Optional
+import time
+from typing import Any, Callable, Optional
 
 from agents.blue_agent import BlueAgent
-from agents.gap_agent import GapAgent
 from agents.red_agent import RedAgent
+from core.demo_loader import state_from_demo_payload
 from core.mitre_loader import MitreLoader
-from core.splunk_client import SplunkClient
 from core.state import ARIAState
 
 
@@ -26,10 +26,12 @@ class Orchestrator:
 
     def __init__(
         self,
-        splunk_client: SplunkClient,
-        gap_agent: GapAgent,
+        splunk_client: Any,
+        gap_agent: Any,
         mitre_loader: Optional[MitreLoader] = None,
         on_state_change: Optional[Callable[[dict], None]] = None,
+        demo_mode: bool = False,
+        demo_simulate_run_sec: int = 12,
     ):
         self.splunk = splunk_client
         self.mitre = mitre_loader or MitreLoader()
@@ -39,9 +41,17 @@ class Orchestrator:
         self.blue = BlueAgent(splunk_client, self.mitre)
         self.red = RedAgent()
 
+        self.demo_mode = bool(demo_mode)
+        self.demo_simulate_run_sec = max(4, int(demo_simulate_run_sec))
+        self._demo_seed_payload: Optional[dict] = None
+
         self.state = ARIAState()
         self._lock = threading.Lock()
         self.is_running = False
+
+    def set_demo_seed_payload(self, payload: dict):
+        """Store deterministic demo fixture payload used by run_demo()."""
+        self._demo_seed_payload = payload
 
     def run(self, gap_limit: int = 10) -> ARIAState:
         """
@@ -73,6 +83,161 @@ class Orchestrator:
             self._notify()
 
         return self.state
+
+    def run_demo(self, gap_limit: int = 10) -> ARIAState:
+        """Deterministic simulation path for demos when external deps are unavailable."""
+        with self._lock:
+            if self.is_running:
+                raise RuntimeError("An ARIA run is already in progress.")
+            self.is_running = True
+
+            if self._demo_seed_payload:
+                self.state = state_from_demo_payload(self._demo_seed_payload)
+            else:
+                self.state = ARIAState()
+
+        try:
+            safe_gap_limit = max(0, int(gap_limit))
+            # Split total duration into stable phase windows.
+            step = max(1.0, self.demo_simulate_run_sec / 4)
+
+            self.state.set_phase("auditing")
+            self.state.log(
+                "Orchestrator", "Starting Blue Agent - auditing Splunk coverage..."
+            )
+
+            with self.state.locked():
+                # reset staged approvals each demo run so gap_limit is strictly honored.
+                for technique in self.state.techniques.values():
+                    technique.pending_approval = False
+
+                self.state.coverage_before = self.state.coverage_score
+                self.state.coverage_after = self.state.coverage_score
+                self.state.gaps_identified = self.state.gap_count
+                self.state.rules_generated = 0
+                self.state.rules_approved = 0
+                self.state.rules_deployed = 0
+
+            self.state.log(
+                "BlueAgent",
+                f"Audit complete - {self.state.total_techniques} techniques, score {self.state.coverage_score}%",
+            )
+            self.state.log(
+                "Orchestrator",
+                f"Blue Agent complete - {self.state.gap_count} gaps detected, score {self.state.coverage_score}%",
+            )
+            self._notify()
+            time.sleep(step)
+
+            self.state.set_phase("profiling")
+            self.state.log(
+                "Orchestrator", "Starting Red Agent - building attack profiles..."
+            )
+
+            self.red.run(self.state)
+
+            self.state.log(
+                "Orchestrator", f"Red Agent complete - {self._profiled_count()} attack profiles generated"
+            )
+            self._notify()
+            time.sleep(step)
+
+            self.state.set_phase("generating")
+            self.state.log(
+                "Orchestrator",
+                f"Starting Gap Agent - generating SPL rules for up to {safe_gap_limit} gaps...",
+            )
+
+            with self.state.locked():
+                candidates = [
+                    t
+                    for t in self.state.techniques.values()
+                    if t.verdict == "GAP"
+                    and t.generated_rule
+                    and not t.approved
+                    and not t.rejected
+                ]
+
+            queued = min(len(candidates), safe_gap_limit)
+            self.state.log(
+                "GapAgent", f"Starting rule generation - {queued} techniques queued."
+            )
+
+            staged = 0
+            durations = list(self.state.generation_durations_sec)
+            for idx, technique in enumerate(candidates[:safe_gap_limit], start=1):
+                self.state.log(
+                    "GapAgent",
+                    f"Generating rule for {technique.technique_id} - {technique.technique_name}",
+                )
+
+                with self.state.locked():
+                    technique.pending_approval = True
+
+                elapsed_sec = (
+                    durations[idx - 1]
+                    if idx - 1 < len(durations)
+                    else round(max(0.9, step / max(1, safe_gap_limit)), 2)
+                )
+                provider = technique.rule_provider or "splunk_ai_assistant_mcp"
+                confidence = (
+                    technique.rule_confidence
+                    if technique.rule_confidence is not None
+                    else "n/a"
+                )
+                self.state.log(
+                    "GapAgent",
+                    f"rule validated for {technique.technique_id} "
+                    f"(attempt 1, provider {provider}, confidence {confidence}, {elapsed_sec}s)",
+                )
+                staged += 1
+
+            self.state.log(
+                "GapAgent",
+                f"Rule generation complete - {staged} succeeded, 0 failed.",
+            )
+
+            with self.state.locked():
+                # strict behavior: reported generated count follows requested limit.
+                self.state.rules_generated = staged
+                self.state.gaps_identified = self.state.gap_count
+                self.state.coverage_after = self.state.coverage_score
+
+                base_durations = durations[:staged]
+                while len(base_durations) < staged:
+                    base_durations.append(round(max(0.9, step / max(1, staged)), 2))
+                self.state.generation_durations_sec = base_durations
+
+            self.state.set_phase("awaiting_approval")
+            self.state.log(
+                "Orchestrator",
+                f"Gap Agent complete - {staged} rules staged for approval",
+            )
+            self._notify()
+            time.sleep(step / 2)
+
+            self.state.mark_complete()
+            self.state.log("Orchestrator", "Pipeline complete.")
+
+        except Exception as e:
+            self.state.log("Orchestrator", f"Demo pipeline failed: {e}", level="error")
+            self.state.set_phase("error")
+
+        finally:
+            with self._lock:
+                self.is_running = False
+            self._notify()
+
+        return self.state
+
+    def _profiled_count(self) -> int:
+        """Return number of techniques with attack profiles."""
+        with self.state.locked():
+            return sum(
+                1
+                for technique in self.state.techniques.values()
+                if technique.attack_profile is not None
+            )
 
     def approve_rule(self, technique_id: str) -> bool:
         """
@@ -109,11 +274,14 @@ class Orchestrator:
                     technique.pending_approval = True
             return False
 
-        deployed = self.splunk.create_saved_search(
-            name=f"ARIA - {technique_id}: {technique_name}",
-            query=rule,
-            description=explanation,
-        )
+        if self.demo_mode:
+            deployed = True
+        else:
+            deployed = self.splunk.create_saved_search(
+                name=f"ARIA - {technique_id}: {technique_name}",
+                query=rule,
+                description=explanation,
+            )
 
         if not deployed:
             self.state.log(
@@ -165,25 +333,26 @@ class Orchestrator:
                 f"Rule deployed and approved for {technique_id} - {technique.technique_name}",
             )
 
-            persisted = self.splunk.save_rule_memory(
-                technique_id=technique.technique_id,
-                technique_name=technique.technique_name,
-                generated_rule=technique.generated_rule,
-                rule_explanation=technique.rule_explanation,
-                rule_confidence=technique.rule_confidence,
-                rule_provider=technique.rule_provider,
-                rule_provider_trace=technique.rule_provider_trace,
-                pending_approval=technique.pending_approval,
-                approved=technique.approved,
-                rejected=technique.rejected,
-                deployed=technique.deployed,
-            )
-            if not persisted:
-                self.state.log(
-                    "Orchestrator",
-                    f"Warning: failed to persist rule memory for {technique_id}",
-                    level="warning",
+            if not self.demo_mode:
+                persisted = self.splunk.save_rule_memory(
+                    technique_id=technique.technique_id,
+                    technique_name=technique.technique_name,
+                    generated_rule=technique.generated_rule,
+                    rule_explanation=technique.rule_explanation,
+                    rule_confidence=technique.rule_confidence,
+                    rule_provider=technique.rule_provider,
+                    rule_provider_trace=technique.rule_provider_trace,
+                    pending_approval=technique.pending_approval,
+                    approved=technique.approved,
+                    rejected=technique.rejected,
+                    deployed=technique.deployed,
                 )
+                if not persisted:
+                    self.state.log(
+                        "Orchestrator",
+                        f"Warning: failed to persist rule memory for {technique_id}",
+                        level="warning",
+                    )
 
         self._notify()
         return True
@@ -213,25 +382,26 @@ class Orchestrator:
                 message += f" - reason: {reason}"
             self.state.log("Orchestrator", message)
 
-            persisted = self.splunk.save_rule_memory(
-                technique_id=technique.technique_id,
-                technique_name=technique.technique_name,
-                generated_rule=technique.generated_rule,
-                rule_explanation=technique.rule_explanation,
-                rule_confidence=technique.rule_confidence,
-                rule_provider=technique.rule_provider,
-                rule_provider_trace=technique.rule_provider_trace,
-                pending_approval=technique.pending_approval,
-                approved=technique.approved,
-                rejected=technique.rejected,
-                deployed=technique.deployed,
-            )
-            if not persisted:
-                self.state.log(
-                    "Orchestrator",
-                    f"Warning: failed to persist rule memory for {technique_id}",
-                    level="warning",
+            if not self.demo_mode:
+                persisted = self.splunk.save_rule_memory(
+                    technique_id=technique.technique_id,
+                    technique_name=technique.technique_name,
+                    generated_rule=technique.generated_rule,
+                    rule_explanation=technique.rule_explanation,
+                    rule_confidence=technique.rule_confidence,
+                    rule_provider=technique.rule_provider,
+                    rule_provider_trace=technique.rule_provider_trace,
+                    pending_approval=technique.pending_approval,
+                    approved=technique.approved,
+                    rejected=technique.rejected,
+                    deployed=technique.deployed,
                 )
+                if not persisted:
+                    self.state.log(
+                        "Orchestrator",
+                        f"Warning: failed to persist rule memory for {technique_id}",
+                        level="warning",
+                    )
 
         self._notify()
         return True

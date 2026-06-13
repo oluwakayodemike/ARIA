@@ -2,7 +2,7 @@ import os
 import sys
 import threading
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -66,3 +66,63 @@ class TestOrchestrator(unittest.TestCase):
         persisted_kwargs = self.mock_splunk.save_rule_memory.call_args.kwargs
         self.assertIn("rule_provider", persisted_kwargs)
         self.assertIn("rule_provider_trace", persisted_kwargs)
+
+    def test_demo_run_strictly_honors_gap_limit(self):
+        payload = {
+            "phase": "idle",
+            "coverage_score": 0.0,
+            "total_techniques": 3,
+            "covered_count": 0,
+            "partial_count": 0,
+            "gap_count": 3,
+            "generation_durations_sec": [1.1, 1.2, 1.3],
+            "techniques": {
+                "T1001": {
+                    "technique_id": "T1001",
+                    "technique_name": "One",
+                    "verdict": "GAP",
+                    "tactics": ["command-and-control"],
+                    "generated_rule": "search index=one",
+                    "pending_approval": True,
+                },
+                "T1002": {
+                    "technique_id": "T1002",
+                    "technique_name": "Two",
+                    "verdict": "GAP",
+                    "tactics": ["execution"],
+                    "generated_rule": "search index=two",
+                    "pending_approval": True,
+                },
+                "T1003": {
+                    "technique_id": "T1003",
+                    "technique_name": "Three",
+                    "verdict": "GAP",
+                    "tactics": ["impact"],
+                    "generated_rule": "search index=three",
+                    "pending_approval": True,
+                },
+            },
+        }
+
+        orchestrator = Orchestrator(
+            splunk_client=self.mock_splunk,
+            gap_agent=self.mock_gap,
+            mitre_loader=self.mock_mitre,
+            demo_mode=True,
+            demo_simulate_run_sec=4,
+        )
+        orchestrator.set_demo_seed_payload(payload)
+
+        with patch("agents.orchestrator.time.sleep"):
+            state = orchestrator.run_demo(gap_limit=1)
+
+        pending = state.get_pending_approvals()
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(state.rules_generated, 1)
+        self.assertEqual(state.generation_durations_sec, [1.1])
+
+        log_messages = [entry["message"] for entry in state.reasoning_log]
+        self.assertTrue(any("Profiled T1001" in message for message in log_messages))
+        self.assertTrue(
+            any("Starting rule generation - 1 techniques queued." in message for message in log_messages)
+        )

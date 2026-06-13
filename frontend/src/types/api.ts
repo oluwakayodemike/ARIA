@@ -42,6 +42,7 @@ export interface HealthResponse {
   status: "ok"
   is_running: boolean
   phase: Phase
+  demo_mode?: boolean
 }
 
 export interface Technique {

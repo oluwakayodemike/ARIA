@@ -89,18 +89,26 @@ function OverviewPage() {
           </h1>
         </div>
 
-        <div className="flex items-center gap-2 rounded-full border border-surface-600/70 bg-surface-800/70 px-3 py-1.5 text-xs text-ink-secondary">
-          <span
-            className={[
-              "h-2 w-2 rounded-full",
-              socket.status === "connected"
-                ? "bg-verdict-covered"
-                : socket.status === "reconnecting"
-                  ? "bg-verdict-partial"
-                  : "bg-verdict-gap",
-            ].join(" ")}
-          />
-          <span>Socket {socket.status}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          {health?.demo_mode ? (
+            <span className="rounded-full border border-accent-primary/45 bg-accent-primary/16 px-3 py-1.5 text-xs text-accent-glow">
+              Demo Mode
+            </span>
+          ) : null}
+
+          <div className="flex items-center gap-2 rounded-full border border-surface-600/70 bg-surface-800/70 px-3 py-1.5 text-xs text-ink-secondary">
+            <span
+              className={[
+                "h-2 w-2 rounded-full",
+                socket.status === "connected"
+                  ? "bg-verdict-covered"
+                  : socket.status === "reconnecting"
+                    ? "bg-verdict-partial"
+                    : "bg-verdict-gap",
+              ].join(" ")}
+            />
+            <span>Socket {socket.status}</span>
+          </div>
         </div>
       </header>
 
@@ -157,7 +165,7 @@ function OverviewPage() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <MetricCard
           title="Phase"
-          value={state?.phase ?? "—"}
+          value={state ? formatPhaseLabel(state.phase) : "—"}
           loading={isStateLoading}
           error={
             isStateError
@@ -239,6 +247,65 @@ function OverviewPage() {
               </ul>
             )}
           </div>
+
+          <section className="mt-5 border-t border-surface-600/70 pt-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="muted-label">Run Impact Summary</p>
+                <h3 className="mt-1 text-base font-semibold text-accent-glow">
+                  Coverage and Detection Outcomes
+                </h3>
+              </div>
+              <p className="text-xs text-ink-muted">Current run snapshot</p>
+            </div>
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <ImpactStat
+                label="Coverage before"
+                value={state ? `${state.coverage_before}%` : "—"}
+              />
+              <ImpactStat
+                label="Coverage after"
+                value={state ? `${state.coverage_after}%` : "—"}
+              />
+              <ImpactStat
+                label="Coverage lift"
+                value={state ? `+${coverageLift}%` : "—"}
+              />
+              <ImpactStat
+                label="Gaps found"
+                value={state?.gaps_identified ?? "—"}
+              />
+              <ImpactStat
+                label="Rules generated"
+                value={state?.rules_generated ?? "—"}
+              />
+              <ImpactStat
+                label="Rules approved"
+                value={state?.rules_approved ?? "—"}
+              />
+              <ImpactStat
+                label="Rules deployed"
+                value={state?.rules_deployed ?? "—"}
+              />
+              <ImpactStat
+                label="Avg generation time"
+                value={state ? `${state.avg_generation_time.toFixed(2)}s` : "—"}
+              />
+            </div>
+
+            <div className="mt-3 rounded-lg border border-surface-600/70 bg-surface-800/70 p-3">
+              <p className="text-xs uppercase tracking-[0.12em] text-ink-muted">
+                Estimated analyst time saved
+              </p>
+              <p className="mt-1 text-2xl font-semibold text-accent-glow">
+                {state?.analyst_minutes_saved_estimate ?? "—"} min
+              </p>
+              <p className="mt-1 text-xs text-ink-muted">
+                Based on 15 minutes saved per generated candidate detection.
+              </p>
+            </div>
+          </section>
         </div>
 
         <aside className="glass-card p-4">
@@ -286,66 +353,6 @@ function OverviewPage() {
           ) : null}
         </aside>
       </div>
-
-      <section className="glass-card p-4 md:p-5">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="muted-label">Pipeline Analytics</p>
-            <h2 className="mt-1 text-lg font-semibold text-accent-glow">
-              Operational Impact & Coverage Telemetry
-            </h2>
-          </div>
-          <p className="text-xs text-ink-muted">Active execution cycle</p>
-        </div>
-
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <ImpactStat
-            label="Telemetry Baseline"
-            value={state ? `${state.coverage_before}%` : "—"}
-          />
-          <ImpactStat
-            label="Post-Run Target"
-            value={state ? `${state.coverage_after}%` : "—"}
-          />
-          <ImpactStat
-            label="Net Coverage Delta"
-            value={state ? `+${coverageLift}%` : "—"}
-          />
-          <ImpactStat
-            label="Coverage Gaps Isolated"
-            value={state?.gaps_identified ?? "—"}
-          />
-          <ImpactStat
-            label="Detections Synthesized"
-            value={state?.rules_generated ?? "—"}
-          />
-          <ImpactStat
-            label="Detections Approved"
-            value={state?.rules_approved ?? "—"}
-          />
-          <ImpactStat
-            label="Live Deployments"
-            value={state?.rules_deployed ?? "—"}
-          />
-          <ImpactStat
-            label="Avg Pipeline Latency"
-            value={state ? `${state.avg_generation_time.toFixed(2)}s` : "—"}
-          />
-        </div>
-
-        <div className="mt-3 rounded-lg border border-surface-600/70 bg-surface-800/70 p-3">
-          <p className="text-xs uppercase tracking-[0.12em] text-ink-muted">
-            Engineering Cycles Reclaimed
-          </p>
-          <p className="mt-1 text-2xl font-semibold text-accent-glow">
-            ~{state?.analyst_minutes_saved_estimate ?? "—"} minutes
-          </p>
-          <p className="mt-1 text-xs text-ink-muted">
-            Calculated using a 15-minute standard industry benchmark for manual
-            detection design, testing, and schema validation.
-          </p>
-        </div>
-      </section>
     </section>
   )
 }
@@ -378,6 +385,11 @@ function MetricCard({
   loading: boolean
   error: string | null
 }) {
+  const valueClassName =
+    title === "Phase"
+      ? "mt-2 break-words text-xl font-semibold leading-tight text-accent-glow"
+      : "mt-2 text-2xl font-semibold text-accent-glow"
+
   return (
     <article className="glass-card p-4">
       <p className="muted-label">{title}</p>
@@ -386,8 +398,12 @@ function MetricCard({
       ) : error ? (
         <p className="mt-2 text-sm text-verdict-gap">{error}</p>
       ) : (
-        <p className="mt-2 text-2xl font-semibold text-accent-glow">{value}</p>
+        <p className={valueClassName}>{value}</p>
       )}
     </article>
   )
+}
+
+function formatPhaseLabel(phase: StateSummary["phase"]) {
+  return phase.replace(/_/g, " ")
 }
