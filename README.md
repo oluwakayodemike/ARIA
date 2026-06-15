@@ -2,7 +2,7 @@
 
 Autonomous Red-Blue Intelligence Agent for Splunk detection coverage.
 
-Most organizations using Splunk can detect fewer than 10% of known MITRE ATT&CK techniques. The remaining 90% are silent blind spots. An attacker can use any of them right now and Splunk sees nothing. ARIA closes that gap autonomously.
+Most organizations using Splunk can detect fewer than 10% of known MITRE ATT&CK techniques. In our own live Splunk environment, ARIA measured exactly 6.1%: 311 of 354 techniques with zero detection coverage. The remaining 90% are silent blind spots.
 
 ARIA audits an organization's Splunk detection posture against MITRE ATT&CK, identifies uncovered techniques, generates validated SPL detection candidates with AI, and routes those candidates through a human approval workflow before deploying them back into Splunk.
 
@@ -65,8 +65,6 @@ For resiliency, ARIA includes a Gemini fallback path **only when MCP is unavaila
 During the submission window, our Splunk trial tenant's SAIA activation consistently failed with:
 
 > `Error generating Splunk Cloud access token.`
-
-Submission demo video: https://youtu.be/e8mCmHSdUs0?si=VbXvtYNXLLXFglIU
 
 Because of this platform-side activation blocker, recorded runs may show fallback generation for some techniques.
 
